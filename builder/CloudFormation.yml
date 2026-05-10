@@ -1,0 +1,502 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Terraform execution environment (S3 and CodeBuild) for Tracis Agent deployment.
+
+Parameters:
+  AgentSubnetIds:
+    Type: CommaDelimitedList
+    Description: "Comma-separated list of subnet IDs for Tracis Agent deployment"
+  BedrockModelId:
+    Type: String
+    Default: "global.anthropic.claude-sonnet-4-6"
+    Description: "Bedrock Model Id (e.g., global.anthropic.claude-sonnet-4-6)"
+  BedrockModelMaxTokens:
+    Type: Number
+    Default: 2048
+    Description: "Maximum tokens for Bedrock model"
+  ImageUrlForCloudWatchMcp:
+    Type: String
+    Default: 471112806528.dkr.ecr.ap-northeast-1.amazonaws.com/ci-aws-logai-cloudwatch-mcp-server-image-repo:latest
+    Description: "ECR image URL for CloudWatch MCP Server (e.g., 123456789012.dkr.ecr.ap-northeast-1.amazonaws.com/my-repo:tag)"
+  ImageUrlForMySqlMcp:
+    Type: String
+    Default: 471112806528.dkr.ecr.ap-northeast-1.amazonaws.com/ci-aws-logai-mysql-mcp-server-image-repo:latest
+    Description: "ECR image URL for MySQL MCP Server (e.g., 123456789012.dkr.ecr.ap-northeast-1.amazonaws.com/my-repo:tag)"
+  ImageUrlForOrchestratorAgent:
+    Type: String
+    Default: 471112806528.dkr.ecr.ap-northeast-1.amazonaws.com/ci-aws-logai-log-analyze-orchestrator-agent-image-repo:latest
+    Description: "ECR image URL for Orchestrator Agent (e.g., 123456789012.dkr.ecr.ap-northeast-1.amazonaws.com/my-repo:tag)"
+  ImageUrlForToolAgent:
+    Type: String
+    Default: 471112806528.dkr.ecr.ap-northeast-1.amazonaws.com/ci-aws-logai-log-analyze-tool-agent-image-repo:latest
+    Description: "ECR image URL for Tool Agent (e.g., 123456789012.dkr.ecr.ap-northeast-1.amazonaws.com/my-repo:tag)"
+  MySqlEndpoint:
+    Type: String
+    Description: "Endpoint for MySQL database (e.g., mydb.cluster-ro-123456789012.ap-northeast-1.rds.amazonaws.com)"
+  MySqlPort:
+    Type: Number
+    Default: 3306
+    Description: "Port number for MySQL database"
+  MySqlDbName:
+    Type: String
+    Description: "Name for MySQL database"
+  MySqlSecurityGroupIds:
+    Type: CommaDelimitedList
+    Description: "Comma-separated list of security group IDs for MySQL database"
+  MySqlSecretArn:
+    Type: String
+    Description: "(Optional) ARN for MySQL secret in AWS Secrets Manager. If not provided, create a new secret."
+  Prefix:
+    Type: String
+    Description: "Prefix for all resources"
+  SlackSecretArn:
+    Type: String
+    Description: "(Optional) ARN for Slack secret in AWS Secrets Manager. If not provided, create a new secret."
+  UseFargateSpot:
+    Type: String
+    AllowedValues:
+      - "true"
+      - "false"
+    Default: "true"
+    Description: "Whether to use Fargate Spot for cost optimization (true/false)"
+
+Resources:
+  TfStateBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub "${Prefix}-tracis-tfstate-${AWS::AccountId}"
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: CleanupOldVersions
+            Status: Enabled
+            NoncurrentVersionExpiration:
+              NewerNoncurrentVersions: 10
+              NoncurrentDays: 60
+
+  TfLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      LogGroupName: !Sub "/aws/codebuild/${Prefix}-tracis-terraform-logs"
+      RetentionInDays: 120
+
+  CodeBuildServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${Prefix}-tracis-tf-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                "aws:SourceArn":
+                  - !Sub "arn:${AWS::Partition}:codebuild:${AWS::Region}:${AWS::AccountId}:project/${Prefix}-tracis-start-agent"
+                  - !Sub "arn:${AWS::Partition}:codebuild:${AWS::Region}:${AWS::AccountId}:project/${Prefix}-tracis-stop-agent"
+                  - !Sub "arn:${AWS::Partition}:codebuild:${AWS::Region}:${AWS::AccountId}:project/${Prefix}-tracis-delete-agent"
+      Policies:
+        - PolicyName: CodeBuildLogsPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: CodeBuildLogsAccess
+                Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "${TfLogGroup.Arn}:*"
+        - PolicyName: TerraformStatePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: TfStateBucketAccess
+                Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource:
+                  - !GetAtt TfStateBucket.Arn
+                  - !Sub "${TfStateBucket.Arn}/*"
+        - PolicyName: ComputeAndNetworkResourcePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: ECSAccess
+                Effect: Allow
+                Action: ecs:*
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:cluster/${Prefix}-*"
+                  - !Sub "arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:service/${Prefix}-*/*"
+                  - !Sub "arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:capacity-provider/*"
+              - Sid: ECSTaskDefinitionAccess
+                Effect: Allow
+                Action:
+                  - ecs:DeregisterTaskDefinition
+                  - ecs:DescribeTaskDefinition
+                  - ecs:ListTask*
+                  - ecs:RegisterTaskDefinition
+                  - ecs:TagResource
+                  - ecs:UntagResource
+                Resource: "*"
+              - Sid: EC2Access
+                Effect: Allow
+                Action:
+                  - ec2:AuthorizeSecurityGroup*
+                  - ec2:CreateSecurityGroup
+                  - ec2:CreateTags
+                  - ec2:DeleteSecurityGroup
+                  - ec2:DeleteTags
+                  - ec2:DescribeAvailabilityZones
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DescribeSecurityGroupRules
+                  - ec2:DescribeSecurityGroups
+                  - ec2:DescribeSubnets
+                  - ec2:DescribeVpcs
+                  - ec2:ModifySecurityGroupRules
+                  - ec2:RevokeSecurityGroup*
+                  - ec2:UpdateSecurityGroupRuleDescriptions*
+                Resource: "*"
+              - Sid: AppAutoScalingAccess
+                Effect: Allow
+                Action: application-autoscaling:*
+                Resource: !Sub "arn:${AWS::Partition}:application-autoscaling:${AWS::Region}:${AWS::AccountId}:scalable-target/*"
+              - Sid: ServiceDiscoveryAccess
+                Effect: Allow
+                Action: servicediscovery:*
+                Resource: !Sub "arn:${AWS::Partition}:servicediscovery:${AWS::Region}:${AWS::AccountId}:*"
+              - Sid: Route53Access
+                Effect: Allow
+                Action:
+                  - route53:ChangeResourceRecordSets
+                  - route53:CreateHostedZone
+                  - route53:DeleteHostedZone
+                  - route53:GetChange
+                  - route53:GetHostedZone
+                  - route53:ListHostedZones*
+                  - route53:ListResourceRecordSets
+                Resource: "*"
+        - PolicyName: StorageAndMessagingResourcePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: S3Access
+                Effect: Allow
+                Action: s3:*
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:s3:::${Prefix}-*"
+                  - !Sub "arn:${AWS::Partition}:s3:::${Prefix}-*/*"
+              - Sid: S3GetObjectGlobalAccess
+                Effect: Allow
+                Action: s3:GetObject
+                Resource: "*"
+              - Sid: S3VectorsAccess
+                Effect: Allow
+                Action: s3vectors:*
+                Resource: !Sub "arn:${AWS::Partition}:s3vectors:${AWS::Region}:${AWS::AccountId}:*"
+              - Sid: SQSAccess
+                Effect: Allow
+                Action: sqs:*
+                Resource: !Sub "arn:${AWS::Partition}:sqs:${AWS::Region}:${AWS::AccountId}:${Prefix}-*"
+              - Sid: KMSAccess
+                Effect: Allow
+                Action: kms:*
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:kms:${AWS::Region}:${AWS::AccountId}:key/*"
+                  - !Sub "arn:${AWS::Partition}:kms:${AWS::Region}:${AWS::AccountId}:alias/*"
+              - Sid: KMSGlobalAccess
+                Effect: Allow
+                Action:
+                  - kms:CreateKey
+                  - kms:ListAliases
+                  - kms:ListKeys
+                Resource: "*"
+              - Sid: SecretsManagerAccess
+                Effect: Allow
+                Action: secretsmanager:*
+                Resource: !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${Prefix}-*"
+        - PolicyName: AIAndLogsResourcePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: BedrockAccess
+                Effect: Allow
+                Action:
+                  - bedrock:*
+                  - bedrock-agent:*
+                Resource: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:*"
+              - Sid: CloudWatchLogsGroupAccess
+                Effect: Allow
+                Action: logs:*
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:*${Prefix}-*"
+                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:*${Prefix}-*:*"
+              - Sid: CloudWatchLogsDeliveryAccess
+                Effect: Allow
+                Action:
+                  - logs:CreateDelivery
+                  - logs:CreateLogDelivery
+                  - logs:CreateLogGroup
+                  - logs:DeleteDelivery*
+                  - logs:DeleteLogDelivery
+                  - logs:DeleteLogGroup
+                  - logs:DeleteResourcePolicy
+                  - logs:DescribeLogGroups
+                  - logs:DescribeResourcePolicies
+                  - logs:GetDelivery*
+                  - logs:ListDeliveries*
+                  - logs:ListLogDeliveries
+                  - logs:ListTags*
+                  - logs:PutDelivery*
+                  - logs:PutResourcePolicy
+                  - logs:PutRetentionPolicy
+                  - logs:TagResource
+                  - logs:UpdateDelivery
+                  - logs:UpdateLogDelivery
+                Resource: "*"
+        - PolicyName: ServerlessAndIAMResourcePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: IAMAccess
+                Effect: Allow
+                Action: iam:*
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${Prefix}-*"
+                  - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/${Prefix}-*"
+              - Sid: IAMServiceLinkedRoleAccess
+                Effect: Allow
+                Action:
+                  - iam:CreateServiceLinkedRole
+                  - iam:DeleteServiceLinkedRole
+                  - iam:GetServiceLinkedRoleDeletionStatus
+                Resource: "*"
+              - Sid: LambdaAccess
+                Effect: Allow
+                Action: lambda:*
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${Prefix}-*"
+                  - !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:layer:aws-lambda-powertools-*"
+              - Sid: APIGatewayAccess
+                Effect: Allow
+                Action: apigateway:*
+                Resource: !Sub "arn:${AWS::Partition}:apigateway:${AWS::Region}::*"
+              - Sid: CloudFormationAccess
+                Effect: Allow
+                Action:
+                  - cloudformation:*
+                  - serverlessrepo:*
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${Prefix}-*/*"
+                  - !Sub "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/serverlessrepo-*/*"
+                  - !Sub "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/aws-serverless-repository-*/*"
+                  - !Sub "arn:${AWS::Partition}:cloudformation:${AWS::Region}:aws:transform/*"
+                  - !Sub "arn:${AWS::Partition}:serverlessrepo:*:*:applications/*"
+
+  CodeBuildStartAgent:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub "${Prefix}-tracis-start-agent"
+      ServiceRole: !GetAtt CodeBuildServiceRole.Arn
+      Artifacts:
+        Type: NO_ARTIFACTS
+      Environment:
+        Type: ARM_LAMBDA_CONTAINER
+        ComputeType: BUILD_LAMBDA_2GB
+        Image: aws/codebuild/amazonlinux-aarch64-lambda-standard:python3.13
+        PrivilegedMode: false
+        EnvironmentVariables:
+          - Name: TF_STATE_BUCKET
+            Value: !Ref TfStateBucket
+          - Name: TF_ACTION
+            Value: apply
+          - Name: DESIRED_COUNT
+            Value: "1"
+          - Name: PREFIX
+            Value: !Ref Prefix
+          - Name: SUBNET_IDS
+            Value: !Join [",", !Ref AgentSubnetIds]
+          - Name: MYSQL_ENDPOINT
+            Value: !Ref MySqlEndpoint
+          - Name: MYSQL_PORT
+            Value: !Ref MySqlPort
+          - Name: MYSQL_DB_NAME
+            Value: !Ref MySqlDbName
+          - Name: MYSQL_SECURITY_GROUP_IDS
+            Value: !Join [",", !Ref MySqlSecurityGroupIds]
+          - Name: MYSQL_SECRET_ARN
+            Value: !Ref MySqlSecretArn
+          - Name: SLACK_SECRET_ARN
+            Value: !Ref SlackSecretArn
+          - Name: BEDROCK_MODEL_ID
+            Value: !Ref BedrockModelId
+          - Name: MAX_TOKENS
+            Value: !Ref BedrockModelMaxTokens
+          - Name: ORCHESTRATOR_AGENT_IMAGE_URL
+            Value: !Ref ImageUrlForOrchestratorAgent
+          - Name: TOOL_AGENT_IMAGE_URL
+            Value: !Ref ImageUrlForToolAgent
+          - Name: CLOUDWATCH_MCP_IMAGE_URL
+            Value: !Ref ImageUrlForCloudWatchMcp
+          - Name: MYSQL_MCP_IMAGE_URL
+            Value: !Ref ImageUrlForMySqlMcp
+          - Name: USE_FARGATE_SPOT
+            Value: !Ref UseFargateSpot
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+          GroupName: !Ref TfLogGroup
+          StreamName: !Sub "${Prefix}-tracis-start-agent"
+      Source:
+        Type: GITHUB
+        Location: https://github.com/Tracis-ai/tracis-aws-marketplace
+        GitCloneDepth: 1
+        GitSubmodulesConfig:
+          FetchSubmodules: false
+        BuildSpec: builder/buildspec.yml
+
+  CodeBuildStopAgent:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub "${Prefix}-tracis-stop-agent"
+      ServiceRole: !GetAtt CodeBuildServiceRole.Arn
+      Artifacts:
+        Type: NO_ARTIFACTS
+      Environment:
+        Type: ARM_LAMBDA_CONTAINER
+        ComputeType: BUILD_LAMBDA_2GB
+        Image: aws/codebuild/amazonlinux-aarch64-lambda-standard:python3.13
+        PrivilegedMode: false
+        EnvironmentVariables:
+          - Name: TF_STATE_BUCKET
+            Value: !Ref TfStateBucket
+          - Name: TF_ACTION
+            Value: apply
+          - Name: DESIRED_COUNT
+            Value: "0"
+          - Name: PREFIX
+            Value: !Ref Prefix
+          - Name: SUBNET_IDS
+            Value: !Join [",", !Ref AgentSubnetIds]
+          - Name: MYSQL_ENDPOINT
+            Value: !Ref MySqlEndpoint
+          - Name: MYSQL_PORT
+            Value: !Ref MySqlPort
+          - Name: MYSQL_DB_NAME
+            Value: !Ref MySqlDbName
+          - Name: MYSQL_SECURITY_GROUP_IDS
+            Value: !Join [",", !Ref MySqlSecurityGroupIds]
+          - Name: MYSQL_SECRET_ARN
+            Value: !Ref MySqlSecretArn
+          - Name: SLACK_SECRET_ARN
+            Value: !Ref SlackSecretArn
+          - Name: BEDROCK_MODEL_ID
+            Value: !Ref BedrockModelId
+          - Name: MAX_TOKENS
+            Value: !Ref BedrockModelMaxTokens
+          - Name: ORCHESTRATOR_AGENT_IMAGE_URL
+            Value: !Ref ImageUrlForOrchestratorAgent
+          - Name: TOOL_AGENT_IMAGE_URL
+            Value: !Ref ImageUrlForToolAgent
+          - Name: CLOUDWATCH_MCP_IMAGE_URL
+            Value: !Ref ImageUrlForCloudWatchMcp
+          - Name: MYSQL_MCP_IMAGE_URL
+            Value: !Ref ImageUrlForMySqlMcp
+          - Name: USE_FARGATE_SPOT
+            Value: !Ref UseFargateSpot
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+          GroupName: !Ref TfLogGroup
+          StreamName: !Sub "${Prefix}-tracis-stop-agent"
+      Source:
+        Type: GITHUB
+        Location: https://github.com/Tracis-ai/tracis-aws-marketplace
+        GitCloneDepth: 1
+        GitSubmodulesConfig:
+          FetchSubmodules: false
+        BuildSpec: builder/buildspec.yml
+
+  CodeBuildDeleteAgent:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub "${Prefix}-tracis-delete-agent"
+      ServiceRole: !GetAtt CodeBuildServiceRole.Arn
+      Artifacts:
+        Type: NO_ARTIFACTS
+      Environment:
+        Type: ARM_LAMBDA_CONTAINER
+        ComputeType: BUILD_LAMBDA_2GB
+        Image: aws/codebuild/amazonlinux-aarch64-lambda-standard:python3.13
+        PrivilegedMode: false
+        EnvironmentVariables:
+          - Name: TF_STATE_BUCKET
+            Value: !Ref TfStateBucket
+          - Name: TF_ACTION
+            Value: destroy
+          - Name: DESIRED_COUNT
+            Value: "0"
+          - Name: PREFIX
+            Value: !Ref Prefix
+          - Name: SUBNET_IDS
+            Value: !Join [",", !Ref AgentSubnetIds]
+          - Name: MYSQL_ENDPOINT
+            Value: !Ref MySqlEndpoint
+          - Name: MYSQL_PORT
+            Value: !Ref MySqlPort
+          - Name: MYSQL_DB_NAME
+            Value: !Ref MySqlDbName
+          - Name: MYSQL_SECURITY_GROUP_IDS
+            Value: !Join [",", !Ref MySqlSecurityGroupIds]
+          - Name: MYSQL_SECRET_ARN
+            Value: !Ref MySqlSecretArn
+          - Name: SLACK_SECRET_ARN
+            Value: !Ref SlackSecretArn
+          - Name: BEDROCK_MODEL_ID
+            Value: !Ref BedrockModelId
+          - Name: MAX_TOKENS
+            Value: !Ref BedrockModelMaxTokens
+          - Name: ORCHESTRATOR_AGENT_IMAGE_URL
+            Value: !Ref ImageUrlForOrchestratorAgent
+          - Name: TOOL_AGENT_IMAGE_URL
+            Value: !Ref ImageUrlForToolAgent
+          - Name: CLOUDWATCH_MCP_IMAGE_URL
+            Value: !Ref ImageUrlForCloudWatchMcp
+          - Name: MYSQL_MCP_IMAGE_URL
+            Value: !Ref ImageUrlForMySqlMcp
+          - Name: USE_FARGATE_SPOT
+            Value: !Ref UseFargateSpot
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+          GroupName: !Ref TfLogGroup
+          StreamName: !Sub "${Prefix}-tracis-delete-agent"
+      Source:
+        Type: GITHUB
+        Location: https://github.com/Tracis-ai/tracis-aws-marketplace
+        GitCloneDepth: 1
+        GitSubmodulesConfig:
+          FetchSubmodules: false
+        BuildSpec: builder/buildspec.yml
+
+Outputs:
+  TfStateBucketName:
+    Value: !Ref TfStateBucket
+  StartAgentBuildPjName:
+    Value: !Ref CodeBuildStartAgent
+  StopAgentBuildPjName:
+    Value: !Ref CodeBuildStopAgent
+  DeleteAgentBuildPjName:
+    Value: !Ref CodeBuildDeleteAgent
