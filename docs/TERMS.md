@@ -1,4 +1,4 @@
-# ログ分析 AI エージェント *Tracis*
+# ログ分析 AI エージェント *TracisAI*
 
 ## 利用規約　追加条項
 本追加条項（以下「本追加条項」といいます。）は、AWS Marketplace Standard Contract（以下「本契約」といいます。）に付随し、本契約を補完するものです。

@@ -1,14 +1,14 @@
 AWSTemplateFormatVersion: "2010-09-09"
-Description: Terraform execution environment (S3 and CodeBuild) for Tracis Agent deployment.
+Description: Terraform execution environment (S3 and CodeBuild) for TracisAI Agent deployment.
 
 Parameters:
   AgentImageUrl:
     Type: String
     Default: 709825985650.dkr.ecr.us-east-1.amazonaws.com/btm/tracis-free:20260520-125957-0fb7c715
-    Description: "ECR image URL for Tracis Agent (e.g., 123456789012.dkr.ecr.ap-northeast-1.amazonaws.com/my-repo:tag)"
+    Description: "ECR image URL for TracisAI Agent (e.g., 123456789012.dkr.ecr.ap-northeast-1.amazonaws.com/my-repo:tag)"
   AgentSubnetIds:
     Type: CommaDelimitedList
-    Description: "Comma-separated list of subnet IDs for Tracis Agent deployment"
+    Description: "Comma-separated list of subnet IDs for TracisAI Agent deployment"
   BedrockModelId:
     Type: String
     Default: "global.anthropic.claude-sonnet-4-6"

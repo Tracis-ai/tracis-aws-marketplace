@@ -31,20 +31,20 @@
 5. `スタックの名前` に任意のスタック名を入力
 6. `パラメータ` セクションにて デフォルト値が空の項目に必要な値を入力し [次へ] をクリック
 
-| パラメータ名                     | 説明                                              | 入力例・補足                                                                                                                                                                |
-| :------------------------------- | :------------------------------------------------ | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **AgentImageUrl**                | Tracis Agent用のECRイメージURL                    | `123456789012.dkr.ecr.ap-northeast-1.amazonaws.com/my-repo:tag`                                                                                                             |
-| **AgentSubnetIds**               | Tracis Agentの展開用サブネットID                  | `subnet-0123xx,subnet-0456yy`<br>※複数指定する場合は、カンマ区切りで入力してください。                                                                                      |
-| **BedrockModelId**               | BedrockモデルID                                   | `global.anthropic.claude-sonnet-4-6`                                                                                                                                        |
-| **BedrockModelMaxTokens**        | Bedrockモデルの最大トークン数                     | `8192`<br>※この上限を超えるトークンを処理しようとした場合、エージェント処理が失敗する可能性があります。値を大きくすることで回避できますが、トークン使用コストが増加します。 |
-| **MySqlDbName**                  | MySQLデータベースの名前                           | `project_db`                                                                                                                                                                |
-| **MySqlEndpoint**                | MySQL データベースのエンドポイント                | `mydb.cluster-ro-123456789012.ap-northeast-1.rds.amazonaws.com`                                                                                                             |
-| **MySqlPort**                    | MySQLデータベースのポート番号                     | `3306`                                                                                                                                                                      |
-| **MySqlSecretArn**               | AWS Secrets Manager 内の MySQL シークレットの ARN | `arn:aws:secretsmanager:...`<br>※指定がない場合は、新しい空のシークレットが作成されます。                                                                                   |
-| **MySqlSecurityGroupIds**        | MySQLデータベースのセキュリティグループID         | `sg-0abc123...`<br>※複数指定する場合は、カンマ区切りで入力してください。                                                                                                    |
-| **Prefix**                       | すべてのリソースに対するプレフィックス            | `my-app-dev`                                                                                                                                                                |
-| **SlackSecretArn**               | AWS Secrets Manager 内の Slack シークレットの ARN | `arn:aws:secretsmanager:...`<br>※指定がない場合は、新しい空のシークレットが作成されます。                                                                                   |
-| **UseFargateSpot**               | Fargate Spot 実行環境を利用するかどうか           | `true` または `false`<br>※有効 (true) にする場合、割引料金で ECS タスクを実行できる一方で、タスク中断の可能性があります。                                                   |
+| パラメータ名              | 説明                                              | 入力例・補足                                                                                                                                                                |
+| :------------------------ | :------------------------------------------------ | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **AgentImageUrl**         | TracisAI Agent用のECRイメージURL                  | `123456789012.dkr.ecr.ap-northeast-1.amazonaws.com/my-repo:tag`                                                                                                             |
+| **AgentSubnetIds**        | TracisAI Agentの展開用サブネットID                | `subnet-0123xx,subnet-0456yy`<br>※複数指定する場合は、カンマ区切りで入力してください。                                                                                      |
+| **BedrockModelId**        | BedrockモデルID                                   | `global.anthropic.claude-sonnet-4-6`                                                                                                                                        |
+| **BedrockModelMaxTokens** | Bedrockモデルの最大トークン数                     | `8192`<br>※この上限を超えるトークンを処理しようとした場合、エージェント処理が失敗する可能性があります。値を大きくすることで回避できますが、トークン使用コストが増加します。 |
+| **MySqlDbName**           | MySQLデータベースの名前                           | `project_db`                                                                                                                                                                |
+| **MySqlEndpoint**         | MySQL データベースのエンドポイント                | `mydb.cluster-ro-123456789012.ap-northeast-1.rds.amazonaws.com`                                                                                                             |
+| **MySqlPort**             | MySQLデータベースのポート番号                     | `3306`                                                                                                                                                                      |
+| **MySqlSecretArn**        | AWS Secrets Manager 内の MySQL シークレットの ARN | `arn:aws:secretsmanager:...`<br>※指定がない場合は、新しい空のシークレットが作成されます。                                                                                   |
+| **MySqlSecurityGroupIds** | MySQLデータベースのセキュリティグループID         | `sg-0abc123...`<br>※複数指定する場合は、カンマ区切りで入力してください。                                                                                                    |
+| **Prefix**                | すべてのリソースに対するプレフィックス            | `my-app-dev`                                                                                                                                                                |
+| **SlackSecretArn**        | AWS Secrets Manager 内の Slack シークレットの ARN | `arn:aws:secretsmanager:...`<br>※指定がない場合は、新しい空のシークレットが作成されます。                                                                                   |
+| **UseFargateSpot**        | Fargate Spot 実行環境を利用するかどうか           | `true` または `false`<br>※有効 (true) にする場合、割引料金で ECS タスクを実行できる一方で、タスク中断の可能性があります。                                                   |
 
 1. `スタックオプションの設定` 画面で [次へ] をクリック
 2. 内容を確認し [送信] をクリック
