@@ -4,48 +4,73 @@ Description: Terraform execution environment (S3 and CodeBuild) for TracisAI Age
 Parameters:
   AgentImageUrl:
     Type: String
-    Default: 709825985650.dkr.ecr.us-east-1.amazonaws.com/btm/tracis-free:20260520-125957-0fb7c715
-    Description: "ECR image URL for TracisAI Agent (e.g., 123456789012.dkr.ecr.ap-northeast-1.amazonaws.com/my-repo:tag)"
+    Default: ""
+    Description: "(Optional) ECR image URL for TracisAI Agent. Specify only to use a particular image."
   AgentSubnetIds:
-    Type: CommaDelimitedList
-    Description: "Comma-separated list of subnet IDs for TracisAI Agent deployment"
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: "Subnet IDs for deploying TracisAI Agent."
   BedrockModelId:
     Type: String
     Default: "global.anthropic.claude-sonnet-4-6"
-    Description: "Bedrock Model Id (e.g., global.anthropic.claude-sonnet-4-6)"
+    Description: "Bedrock model ID (e.g., global.anthropic.claude-sonnet-4-6)."
   BedrockModelMaxTokens:
     Type: Number
     Default: 8192
-    Description: "Maximum tokens for Bedrock model"
+    Description: "Maximum number of tokens for the Bedrock model."
+  PiiOutputEntityTypes:
+    Type: CommaDelimitedList
+    Default: "ADDRESS,AWS_ACCESS_KEY,AWS_SECRET_KEY,CREDIT_DEBIT_CARD_CVV,CREDIT_DEBIT_CARD_EXPIRY,CREDIT_DEBIT_CARD_NUMBER,EMAIL,NAME,PASSWORD,PHONE,PIN,USERNAME"
+    Description: "PII types to anonymize in agent output. Enter multiple values as a comma-delimited list."
+  EnabledDbTypes:
+    Type: CommaDelimitedList
+    Default: "mysql"
+    Description: "Database type to connect. Only mysql is currently supported."
+    AllowedValues:
+      - mysql
   MySqlEndpoint:
     Type: String
-    Description: "Endpoint for MySQL database (e.g., mydb.cluster-ro-123456789012.ap-northeast-1.rds.amazonaws.com)"
+    Default: ""
+    Description: "(Optional; required when using MySQL) MySQL database endpoint (e.g., mydb.cluster-ro-123456789012.ap-northeast-1.rds.amazonaws.com)."
   MySqlPort:
     Type: Number
     Default: 3306
-    Description: "Port number for MySQL database"
+    Description: "(Optional; required when using MySQL) MySQL database port."
   MySqlDbName:
     Type: String
-    Description: "Name for MySQL database"
+    Default: ""
+    Description: "(Optional; required when using MySQL) MySQL database name."
   MySqlSecurityGroupIds:
     Type: CommaDelimitedList
-    Description: "Comma-separated list of security group IDs for MySQL database"
+    Default: ""
+    Description: "(Optional; required when using MySQL) MySQL database security group IDs as a comma-delimited list."
   MySqlSecretArn:
     Type: String
-    Description: "(Optional) ARN for MySQL secret in AWS Secrets Manager. If not provided, create a new secret."
+    Default: ""
+    Description: "(Optional) ARN of the AWS Secrets Manager secret containing MySQL credentials. A secret is created if omitted."
   Prefix:
     Type: String
-    Description: "Prefix for all resources"
-  SlackSecretArn:
+    Description: "Prefix for names of created resources. Use lowercase letters, numbers, and hyphens only; do not begin or end with a hyphen."
+    MinLength: 1
+    MaxLength: 28
+    AllowedPattern: "[a-z0-9]([a-z0-9-]*[a-z0-9])?"
+    ConstraintDescription: "Enter up to 28 lowercase letters, numbers, and hyphens; do not begin or end with a hyphen."
+  ChatToolsSecretArn:
     Type: String
-    Description: "(Optional) ARN for Slack secret in AWS Secrets Manager. If not provided, create a new secret."
-  UseFargateSpot:
+    Default: ""
+    Description: "(Optional) ARN of the AWS Secrets Manager secret containing chat tool credentials. A secret is created if omitted."
+  SourceVersion:
     Type: String
-    AllowedValues:
-      - "true"
-      - "false"
-    Default: "true"
-    Description: "Whether to use Fargate Spot for cost optimization (true/false)"
+    Default: ""
+    Description: "(Optional) Source version of the GitHub repository. Specify only for a particular tag or commit."
+Mappings:
+  ReleaseConfig:
+    Current:
+      SourceVersion: "v202608-2d61f5612560"
+
+Conditions:
+  SourceVersionNotSpecified: !Equals
+    - !Ref SourceVersion
+    - ""
 
 Resources:
   TfStateBucket:
@@ -64,8 +89,8 @@ Resources:
         Rules:
           - Id: CleanupOldVersions
             Status: Enabled
+            ExpiredObjectDeleteMarker: true
             NoncurrentVersionExpiration:
-              NewerNoncurrentVersions: 10
               NoncurrentDays: 60
 
   TfLogGroup:
@@ -90,8 +115,7 @@ Resources:
             Condition:
               StringEquals:
                 "aws:SourceArn":
-                  - !Sub "arn:${AWS::Partition}:codebuild:${AWS::Region}:${AWS::AccountId}:project/${Prefix}-tracis-start-agent"
-                  - !Sub "arn:${AWS::Partition}:codebuild:${AWS::Region}:${AWS::AccountId}:project/${Prefix}-tracis-stop-agent"
+                  - !Sub "arn:${AWS::Partition}:codebuild:${AWS::Region}:${AWS::AccountId}:project/${Prefix}-tracis-deploy-agent"
                   - !Sub "arn:${AWS::Partition}:codebuild:${AWS::Region}:${AWS::AccountId}:project/${Prefix}-tracis-delete-agent"
       Policies:
         - PolicyName: CodeBuildLogsPolicy
@@ -122,29 +146,13 @@ Resources:
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
-              - Sid: ECSAccess
-                Effect: Allow
-                Action: ecs:*
-                Resource:
-                  - !Sub "arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:cluster/${Prefix}-*"
-                  - !Sub "arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:service/${Prefix}-*/*"
-                  - !Sub "arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:capacity-provider/*"
-              - Sid: ECSTaskDefinitionAccess
-                Effect: Allow
-                Action:
-                  - ecs:DeregisterTaskDefinition
-                  - ecs:DescribeTaskDefinition
-                  - ecs:ListTask*
-                  - ecs:RegisterTaskDefinition
-                  - ecs:TagResource
-                  - ecs:UntagResource
-                Resource: "*"
               - Sid: EC2Access
                 Effect: Allow
                 Action:
                   - ec2:AuthorizeSecurityGroup*
                   - ec2:CreateSecurityGroup
                   - ec2:CreateTags
+                  - ec2:DeleteNetworkInterface
                   - ec2:DeleteSecurityGroup
                   - ec2:DeleteTags
                   - ec2:DescribeAvailabilityZones
@@ -152,15 +160,18 @@ Resources:
                   - ec2:DescribeSecurityGroupRules
                   - ec2:DescribeSecurityGroups
                   - ec2:DescribeSubnets
+                  - ec2:DescribeVpcAttribute
                   - ec2:DescribeVpcs
                   - ec2:ModifySecurityGroupRules
                   - ec2:RevokeSecurityGroup*
                   - ec2:UpdateSecurityGroupRuleDescriptions*
                 Resource: "*"
-              - Sid: AppAutoScalingAccess
+              - Sid: RDSDescribeAccess
                 Effect: Allow
-                Action: application-autoscaling:*
-                Resource: !Sub "arn:${AWS::Partition}:application-autoscaling:${AWS::Region}:${AWS::AccountId}:scalable-target/*"
+                Action:
+                  - rds:DescribeDBClusters
+                  - rds:DescribeDBInstances
+                Resource: "*"
         - PolicyName: StorageAndMessagingResourcePolicy
           PolicyDocument:
             Version: "2012-10-17"
@@ -210,12 +221,45 @@ Resources:
                   - bedrock:*
                   - bedrock-agent:*
                 Resource: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:*"
+              - Sid: AgentCoreGlobalAccess
+                Effect: Allow
+                Action:
+                  - bedrock-agentcore:CreateAgentRuntime
+                  - bedrock-agentcore:CreateAgentRuntimeEndpoint
+                  - bedrock-agentcore:ListAgentRuntimeEndpoints
+                  - bedrock-agentcore:ListAgentRuntimes
+                  - bedrock-agentcore:ListAgentRuntimeVersions
+                Resource: "*"
+              - Sid: AgentCoreRuntimeAccess
+                Effect: Allow
+                Action:
+                  - bedrock-agentcore:CreateWorkloadIdentity
+                  - bedrock-agentcore:DeleteAgentRuntime
+                  - bedrock-agentcore:DeleteAgentRuntimeEndpoint
+                  - bedrock-agentcore:DeleteWorkloadIdentity
+                  - bedrock-agentcore:DeleteResourcePolicy
+                  - bedrock-agentcore:GetAgentRuntime
+                  - bedrock-agentcore:GetAgentRuntimeEndpoint
+                  - bedrock-agentcore:GetResourcePolicy
+                  - bedrock-agentcore:ListTagsForResource
+                  - bedrock-agentcore:PutResourcePolicy
+                  - bedrock-agentcore:TagResource
+                  - bedrock-agentcore:UntagResource
+                  - bedrock-agentcore:UpdateAgentRuntime
+                  - bedrock-agentcore:UpdateAgentRuntimeEndpoint
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:runtime/*"
+                  - !Sub "arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:runtime/*/runtime-endpoint/*"
+                  - !Sub "arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:workload-identity-directory/default"
+                  - !Sub "arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:workload-identity-directory/default/workload-identity/*"
               - Sid: CloudWatchLogsGroupAccess
                 Effect: Allow
                 Action: logs:*
                 Resource:
                   - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:*${Prefix}-*"
                   - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:*${Prefix}-*:*"
+                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/tracis-ai/statistics/${Prefix}"
+                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/tracis-ai/statistics/${Prefix}:*"
               - Sid: CloudWatchLogsDeliveryAccess
                 Effect: Allow
                 Action:
@@ -249,6 +293,12 @@ Resources:
                 Resource:
                   - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${Prefix}-*"
                   - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/${Prefix}-*"
+              - Sid: AWSManagedLambdaENIPolicyRead
+                Effect: Allow
+                Action:
+                  - iam:GetPolicy
+                  - iam:GetPolicyVersion
+                Resource: !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaENIManagementAccess"
               - Sid: IAMServiceLinkedRoleAccess
                 Effect: Allow
                 Action:
@@ -262,6 +312,14 @@ Resources:
                 Resource:
                   - !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${Prefix}-*"
                   - !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:layer:aws-lambda-powertools-*"
+                  - !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:event-source-mapping:*"
+              - Sid: LambdaEventSourceMappingCreateAndListAccess
+                Effect: Allow
+                Action:
+                  - lambda:CreateEventSourceMapping
+                  - lambda:GetEventSourceMapping
+                  - lambda:ListEventSourceMappings
+                Resource: "*"
               - Sid: APIGatewayAccess
                 Effect: Allow
                 Action: apigateway:*
@@ -278,10 +336,10 @@ Resources:
                   - !Sub "arn:${AWS::Partition}:cloudformation:${AWS::Region}:aws:transform/*"
                   - !Sub "arn:${AWS::Partition}:serverlessrepo:*:*:applications/*"
 
-  CodeBuildStartAgent:
+  CodeBuildDeployAgent:
     Type: AWS::CodeBuild::Project
     Properties:
-      Name: !Sub "${Prefix}-tracis-start-agent"
+      Name: !Sub "${Prefix}-tracis-deploy-agent"
       ServiceRole: !GetAtt CodeBuildServiceRole.Arn
       Artifacts:
         Type: NO_ARTIFACTS
@@ -295,12 +353,12 @@ Resources:
             Value: !Ref TfStateBucket
           - Name: TF_ACTION
             Value: apply
-          - Name: DESIRED_COUNT
-            Value: "1"
           - Name: PREFIX
             Value: !Ref Prefix
           - Name: SUBNET_IDS
             Value: !Join [",", !Ref AgentSubnetIds]
+          - Name: ENABLED_DB_TYPES
+            Value: !Join [",", !Ref EnabledDbTypes]
           - Name: MYSQL_ENDPOINT
             Value: !Ref MySqlEndpoint
           - Name: MYSQL_PORT
@@ -311,21 +369,21 @@ Resources:
             Value: !Join [",", !Ref MySqlSecurityGroupIds]
           - Name: MYSQL_SECRET_ARN
             Value: !Ref MySqlSecretArn
-          - Name: SLACK_SECRET_ARN
-            Value: !Ref SlackSecretArn
+          - Name: CHAT_TOOLS_SECRET_ARN
+            Value: !Ref ChatToolsSecretArn
           - Name: AGENT_IMAGE_URL
             Value: !Ref AgentImageUrl
           - Name: BEDROCK_MODEL_ID
             Value: !Ref BedrockModelId
           - Name: MAX_TOKENS
             Value: !Ref BedrockModelMaxTokens
-          - Name: USE_FARGATE_SPOT
-            Value: !Ref UseFargateSpot
+          - Name: PII_OUTPUT_ENTITY_TYPES
+            Value: !Join [",", !Ref PiiOutputEntityTypes]
       LogsConfig:
         CloudWatchLogs:
           Status: ENABLED
           GroupName: !Ref TfLogGroup
-          StreamName: !Sub "${Prefix}-tracis-start-agent"
+          StreamName: !Sub "${Prefix}-tracis-deploy-agent"
       Source:
         Type: GITHUB
         Location: https://github.com/Tracis-ai/tracis-aws-marketplace
@@ -333,62 +391,13 @@ Resources:
         GitSubmodulesConfig:
           FetchSubmodules: false
         BuildSpec: builder/buildspec.yml
-
-  CodeBuildStopAgent:
-    Type: AWS::CodeBuild::Project
-    Properties:
-      Name: !Sub "${Prefix}-tracis-stop-agent"
-      ServiceRole: !GetAtt CodeBuildServiceRole.Arn
-      Artifacts:
-        Type: NO_ARTIFACTS
-      Environment:
-        Type: ARM_LAMBDA_CONTAINER
-        ComputeType: BUILD_LAMBDA_2GB
-        Image: aws/codebuild/amazonlinux-aarch64-lambda-standard:python3.13
-        PrivilegedMode: false
-        EnvironmentVariables:
-          - Name: TF_STATE_BUCKET
-            Value: !Ref TfStateBucket
-          - Name: TF_ACTION
-            Value: apply
-          - Name: DESIRED_COUNT
-            Value: "0"
-          - Name: PREFIX
-            Value: !Ref Prefix
-          - Name: SUBNET_IDS
-            Value: !Join [",", !Ref AgentSubnetIds]
-          - Name: MYSQL_ENDPOINT
-            Value: !Ref MySqlEndpoint
-          - Name: MYSQL_PORT
-            Value: !Ref MySqlPort
-          - Name: MYSQL_DB_NAME
-            Value: !Ref MySqlDbName
-          - Name: MYSQL_SECURITY_GROUP_IDS
-            Value: !Join [",", !Ref MySqlSecurityGroupIds]
-          - Name: MYSQL_SECRET_ARN
-            Value: !Ref MySqlSecretArn
-          - Name: SLACK_SECRET_ARN
-            Value: !Ref SlackSecretArn
-          - Name: BEDROCK_MODEL_ID
-            Value: !Ref BedrockModelId
-          - Name: MAX_TOKENS
-            Value: !Ref BedrockModelMaxTokens
-          - Name: AGENT_IMAGE_URL
-            Value: !Ref AgentImageUrl
-          - Name: USE_FARGATE_SPOT
-            Value: !Ref UseFargateSpot
-      LogsConfig:
-        CloudWatchLogs:
-          Status: ENABLED
-          GroupName: !Ref TfLogGroup
-          StreamName: !Sub "${Prefix}-tracis-stop-agent"
-      Source:
-        Type: GITHUB
-        Location: https://github.com/Tracis-ai/tracis-aws-marketplace
-        GitCloneDepth: 1
-        GitSubmodulesConfig:
-          FetchSubmodules: false
-        BuildSpec: builder/buildspec.yml
+      SourceVersion: !If
+        - SourceVersionNotSpecified
+        - !FindInMap
+          - ReleaseConfig
+          - Current
+          - SourceVersion
+        - !Ref SourceVersion
 
   CodeBuildDeleteAgent:
     Type: AWS::CodeBuild::Project
@@ -407,12 +416,12 @@ Resources:
             Value: !Ref TfStateBucket
           - Name: TF_ACTION
             Value: destroy
-          - Name: DESIRED_COUNT
-            Value: "0"
           - Name: PREFIX
             Value: !Ref Prefix
           - Name: SUBNET_IDS
             Value: !Join [",", !Ref AgentSubnetIds]
+          - Name: ENABLED_DB_TYPES
+            Value: ""
           - Name: MYSQL_ENDPOINT
             Value: !Ref MySqlEndpoint
           - Name: MYSQL_PORT
@@ -423,16 +432,16 @@ Resources:
             Value: !Join [",", !Ref MySqlSecurityGroupIds]
           - Name: MYSQL_SECRET_ARN
             Value: !Ref MySqlSecretArn
-          - Name: SLACK_SECRET_ARN
-            Value: !Ref SlackSecretArn
+          - Name: CHAT_TOOLS_SECRET_ARN
+            Value: !Ref ChatToolsSecretArn
           - Name: BEDROCK_MODEL_ID
             Value: !Ref BedrockModelId
           - Name: MAX_TOKENS
             Value: !Ref BedrockModelMaxTokens
+          - Name: PII_OUTPUT_ENTITY_TYPES
+            Value: !Join [",", !Ref PiiOutputEntityTypes]
           - Name: AGENT_IMAGE_URL
             Value: !Ref AgentImageUrl
-          - Name: USE_FARGATE_SPOT
-            Value: !Ref UseFargateSpot
       LogsConfig:
         CloudWatchLogs:
           Status: ENABLED
@@ -445,13 +454,18 @@ Resources:
         GitSubmodulesConfig:
           FetchSubmodules: false
         BuildSpec: builder/buildspec.yml
+      SourceVersion: !If
+        - SourceVersionNotSpecified
+        - !FindInMap
+          - ReleaseConfig
+          - Current
+          - SourceVersion
+        - !Ref SourceVersion
 
 Outputs:
   TfStateBucketName:
     Value: !Ref TfStateBucket
-  StartAgentBuildPjName:
-    Value: !Ref CodeBuildStartAgent
-  StopAgentBuildPjName:
-    Value: !Ref CodeBuildStopAgent
+  DeployAgentBuildPjName:
+    Value: !Ref CodeBuildDeployAgent
   DeleteAgentBuildPjName:
     Value: !Ref CodeBuildDeleteAgent

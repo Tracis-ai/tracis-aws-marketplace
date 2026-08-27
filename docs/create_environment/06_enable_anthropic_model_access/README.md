@@ -53,6 +53,6 @@
 2. モデル呼び出しが成功し、モデルから回答がレスポンスされることを確認する
 
 
-## 次の手順
+## 関連手順
 
-[エージェント（ECS Service）の起動・停止](/docs/create_environment/07_agent_start_stop/README.md)
+[利用開始時の環境構築手順](/docs/create_environment/README.md)を確認する

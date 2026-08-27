@@ -1,8 +1,3 @@
-variable "ecs_service_desired_count" {
-  description = "Desired count for ECS service"
-  type        = number
-}
-
 variable "prefix" {
   description = "Prefix for resources"
   type        = string
@@ -11,6 +6,16 @@ variable "prefix" {
 variable "subnet_ids" {
   description = "Subnet IDs for ECS service"
   type        = string
+}
+
+variable "enabled_db_types" {
+  description = "Database type to connect. Only mysql is currently supported."
+  type        = string
+
+  validation {
+    condition     = contains(["", "mysql"], trimspace(var.enabled_db_types))
+    error_message = "enabled_db_types must be empty or mysql."
+  }
 }
 
 variable "mysql_endpoint" {
@@ -33,13 +38,14 @@ variable "mysql_security_group_ids" {
   type        = string
 }
 
+
 variable "mysql_secret_arn" {
   description = "ARN of Secret for MySQL credentials"
   type        = string
 }
 
-variable "slack_secret_arn" {
-  description = "ARN of Secret for Slack credentials"
+variable "chat_tools_secret_arn" {
+  description = "ARN of Secret for chat tool credentials"
   type        = string
 }
 
@@ -54,11 +60,12 @@ variable "max_tokens" {
 }
 
 variable "agent_image_url" {
-  description = "ECR image URL for Tracis agent"
+  description = "ECR image URL for TracisAI agent"
   type        = string
 }
 
-variable "enable_fargate_spot" {
-  description = "Whether to use Fargate Spot for cost optimization"
-  type        = bool
+variable "pii_output_entity_types" {
+  description = "Comma-separated PII entity types to anonymize in agent output"
+  type        = string
+  default     = ""
 }

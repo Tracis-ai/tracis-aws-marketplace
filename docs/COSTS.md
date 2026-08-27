@@ -5,21 +5,16 @@
 
 ## 想定インフラ構成（ap-northeast-1 / 東京リージョン）
 
-### 常時稼働インフラ
+### リクエスト受信・実行インフラ
 
-* Amazon ECS Fargate
-
-  * 1 vCPU / 2 GiB Memory
-  * Linux / ARM64
-  * Fargate Spot
-  * 常時1タスク稼働
+* チャットツール（Slack／Chatwork）
+* Amazon Bedrock AgentCore Runtime
+* Amazon API Gateway / AWS Lambda / Amazon SQS
+* Amazon Bedrock Knowledge Bases
 
 ### 想定月額（参考）
 
-* ECS Fargate Spot: 約 $10〜20 / 月
-
-※ API Gateway / Lambda / SQS 等も利用していますが、通常利用では ECS および AI 利用料と比較して軽微です。
-※ データ転送量や CloudWatch Logs 出力量等により変動します。
+AgentCore Runtime、API Gateway、Lambda、SQS、Knowledge Bases、データ転送量、CloudWatch Logs 出力量は、実行回数や処理時間によって変動します。
 
 ---
 
@@ -36,8 +31,8 @@
 
 ### 1 回あたりの推定 AI 利用料
 
-| 処理内容    | Token構成                                                            | 推定料金             |
-| ------- | ------------------------------------------------------------------ | ---------------- |
+| 処理内容       | トークン構成                                                       | 推定料金            |
+| -------------- | ------------------------------------------------------------------ | ------------------- |
 | 識別子あり検索 | Cache Read 25,000 / Cache Write 10,000 / Input 200 / Output 1,500  | 約 $0.02〜0.04 / 回 |
 | 識別子なし検索 | Cache Read 150,000 / Cache Write 70,000 / Input 700 / Output 3,500 | 約 $0.15〜0.30 / 回 |
 

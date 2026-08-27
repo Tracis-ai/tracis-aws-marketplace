@@ -22,9 +22,13 @@
 5. ビルドが正常に完了し、ステータスが `成功` になったことを確認
 
 ### 削除確認方法
-1. AWS コンソールで「Amazon ECS」の画面を開く 
-2. 左サイドメニューの [クラスター] を選択
-3. クラスター一覧に [prefix]-tracis-agent-cluster が存在しないことを確認
+1. AWS コンソールで「Amazon Bedrock AgentCore」の画面を開く
+2. [Runtimes] を選択
+3. Prefix 内のハイフンをアンダースコアに置換した Runtime 名（最大 48 文字）が存在しないことを確認
+4. AWS コンソールで「EC2」の画面を開き、[セキュリティグループ] を選択
+5. `[prefix]-tracis-ai-agentcore-runtime-sg` が残っている場合は、選択して [アクション] から [セキュリティグループを削除] を選択し、削除する
+
+> AgentCore Runtime の削除後も、サービス管理のネットワークインターフェイス（ENI）が最大 8 時間残る場合があります。Security Group を削除できない場合は、ENI が解放された後に再度削除してください。詳細は [Amazon Bedrock AgentCore Runtime の VPC 接続に関する AWS ドキュメント](https://docs.aws.amazon.com/ja_jp/bedrock-agentcore/latest/devguide/agentcore-vpc.html#vpc-connectivity-agentcore) を参照してください。
 
 
 ## CloudFormation スタックの削除

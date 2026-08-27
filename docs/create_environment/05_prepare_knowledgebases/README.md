@@ -196,10 +196,9 @@ keywords: payments, 決済, payment, order, stripe, provider, token, status, car
 5. ステータスが `進行中` から `利用可能` に変わったことを確認する
 
 
-## エージェント起動後のデータ更新手順
+## ナレッジベース作成後のデータ更新手順
 1. 上記の「データのアップロード手順」を参考にナレッジベース同期用 S3 バケットの内容を更新する
 2. 上記の「ナレッジベースの同期手順」の要領でナレッジベースの同期を行う
-3. エージェント（ECS Service）が起動済みの場合、エージェントを一旦停止させて再起動する（[エージェント（ECS Service）の起動・停止](/docs/create_environment/07_agent_start_stop/README.md) 参照）
 
 
 ## 次の手順
