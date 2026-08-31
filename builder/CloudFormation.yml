@@ -65,7 +65,7 @@ Parameters:
 Mappings:
   ReleaseConfig:
     Current:
-      SourceVersion: "v202608-5d7d7b67ef3e"
+      SourceVersion: "v202608-f49fc7859773"
 
 Conditions:
   SourceVersionNotSpecified: !Equals
@@ -100,6 +100,13 @@ Resources:
     Properties:
       LogGroupName: !Sub "/aws/codebuild/${Prefix}-tracis-terraform-logs"
       RetentionInDays: 120
+
+  AgentImageMirrorRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub "${Prefix}-tracis-ai-agent-image-repo"
+      EmptyOnDelete: true
+      ImageTagMutability: IMMUTABLE
 
   CodeBuildServiceRole:
     Type: AWS::IAM::Role
@@ -142,6 +149,31 @@ Resources:
                 Resource:
                   - !GetAtt TfStateBucket.Arn
                   - !Sub "${TfStateBucket.Arn}/*"
+        - PolicyName: AgentImageMirrorPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: EcrAuthorization
+                Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: "*"
+              - Sid: PullAgentSourceImage
+                Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:BatchGetImage
+                  - ecr:GetDownloadUrlForLayer
+                Resource: "arn:aws:ecr:us-east-1:709825985650:repository/btm/tracisai-free"
+              - Sid: PushMirrorImage
+                Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:CompleteLayerUpload
+                  - ecr:DescribeImages
+                  - ecr:InitiateLayerUpload
+                  - ecr:PutImage
+                  - ecr:UploadLayerPart
+                Resource: !GetAtt AgentImageMirrorRepository.Arn
         - PolicyName: ComputeAndNetworkResourcePolicy
           PolicyDocument:
             Version: "2012-10-17"
@@ -344,10 +376,10 @@ Resources:
       Artifacts:
         Type: NO_ARTIFACTS
       Environment:
-        Type: ARM_LAMBDA_CONTAINER
-        ComputeType: BUILD_LAMBDA_2GB
-        Image: aws/codebuild/amazonlinux-aarch64-lambda-standard:python3.13
-        PrivilegedMode: false
+        Type: ARM_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux-aarch64-standard:3.0
+        PrivilegedMode: true
         EnvironmentVariables:
           - Name: TF_STATE_BUCKET
             Value: !Ref TfStateBucket
@@ -373,6 +405,8 @@ Resources:
             Value: !Ref ChatToolsSecretArn
           - Name: AGENT_IMAGE_URL
             Value: !Ref AgentImageUrl
+          - Name: AGENT_IMAGE_MIRROR_REPOSITORY_URI
+            Value: !GetAtt AgentImageMirrorRepository.RepositoryUri
           - Name: BEDROCK_MODEL_ID
             Value: !Ref BedrockModelId
           - Name: MAX_TOKENS

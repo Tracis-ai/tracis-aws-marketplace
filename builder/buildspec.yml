@@ -18,6 +18,14 @@ phases:
       - terraform version
   pre_build:
     commands:
+      - |
+        source "$(git rev-parse --show-toplevel)/builder/agent_image_replication.sh"
+        if [ "${TF_ACTION}" = "apply" ]; then
+          docker version
+          AGENT_IMAGE_URL="$(prepare_agent_image "${AGENT_IMAGE_URL}" "${AGENT_IMAGE_MIRROR_REPOSITORY_URI:-}" "${AWS_REGION}")"
+        elif [ "${TF_ACTION}" = "destroy" ]; then
+          AGENT_IMAGE_URL="$(resolve_agent_image_url "${AGENT_IMAGE_URL}")"
+        fi
       - cd ${TF_EXEC_PATH}
       - echo Initializing Terraform...
       - terraform init

@@ -11,18 +11,7 @@ locals {
     "",
   )
 
-  agent_image_url         = trimspace(var.agent_image_url)
-  default_agent_image_url = "709825985650.dkr.ecr.us-east-1.amazonaws.com/btm/tracisai-free:20260828-095016-218a6dd4"
-  expired_default_agent_image_urls = [
-    "709825985650.dkr.ecr.us-east-1.amazonaws.com/btm/tracis-free:20260520-125957-0fb7c715",
-    "709825985650.dkr.ecr.us-east-1.amazonaws.com/btm/tracisai-free:20260826-113900-f19f9f21",
-  ]
-  effective_agent_image_url = (
-    local.agent_image_url != "" &&
-    !contains(local.expired_default_agent_image_urls, local.agent_image_url)
-    ? local.agent_image_url
-    : local.default_agent_image_url
-  )
+  effective_agent_image_url = trimspace(var.agent_image_url)
 
   pii_output_entity_types = (
     trimspace(var.pii_output_entity_types) == ""
