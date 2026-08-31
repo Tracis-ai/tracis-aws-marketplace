@@ -13,7 +13,7 @@
 ## 手順
 
 1. 利用する AWS アカウントで AWS コンソールにサインインする
-2. [TracisAI の AWS Marketplace 製品ページ](https://us-east-1.console.aws.amazon.com/marketplace/search/listing/prodview-rxr4dzl4tfh5o?applicationId=AWS-Marketplace-Console) を開く
+2. [TracisAI の AWS Marketplace 製品ページ](https://us-east-1.console.aws.amazon.com/marketplace/search/listing/prodview-wql3f2ykbnmny) を開く
 3. ページの [料金] と [法的] で、製品料金とベンダー利用規約を確認する。あわせて、[利用規約 追加条項](/docs/TERMS.md) を確認する
 4. [購入オプションを表示] を選択する
 5. 「TracisAI をサブスクライブ」ページで、表示される製品料金と利用規約を確認する
