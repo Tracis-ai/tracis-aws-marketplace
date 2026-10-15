@@ -13,17 +13,12 @@ resource "aws_bedrockagentcore_agent_runtime" "this" {
   environment_variables = local.environment_variables
 
   network_configuration {
-    network_mode = "VPC"
-
-    network_mode_config {
-      security_groups = [
-        aws_security_group.agentcore_runtime.id,
-      ]
-      subnets = var.subnet_ids
-    }
+    network_mode = "PUBLIC"
   }
 
   protocol_configuration {
     server_protocol = "HTTP"
   }
+
+  depends_on = [module.agentcore_runtime_role]
 }

@@ -4,16 +4,6 @@ variable "prefix" {
   nullable    = false
 }
 
-variable "subnet_ids" {
-  description = "Subnet IDs for AgentCore Runtime VPC connectivity"
-  type        = list(string)
-
-  validation {
-    condition     = length(var.subnet_ids) > 0
-    error_message = "At least one subnet ID is required."
-  }
-}
-
 variable "container_image_url" {
   description = "Container image URL for AgentCore Runtime"
   type        = string
@@ -41,6 +31,15 @@ variable "model_config" {
   })
 }
 
+variable "gateway_tools_config" {
+  description = "AgentCore Gateway URL and enabled tools"
+  type = object({
+    enabled_tools = set(string)
+    gateway_url   = string
+  })
+  nullable = false
+}
+
 variable "pii_output_entity_types" {
   description = "PII entity types to anonymize in agent output"
   type        = set(string)
@@ -59,37 +58,4 @@ variable "pii_output_entity_types" {
     "PIN",
     "USERNAME",
   ]
-}
-
-variable "mysql_connection" {
-  description = "MySQL connection parameters"
-  type = object({
-    enabled               = optional(bool, true)
-    host                  = optional(string, "")
-    port                  = optional(number, 3306)
-    db_name               = optional(string, "")
-    db_security_group_ids = optional(list(string), [])
-    secret_arn            = optional(string, "")
-  })
-
-  validation {
-    condition = (
-      !var.mysql_connection.enabled
-      || (
-        trimspace(var.mysql_connection.host) != ""
-        && trimspace(var.mysql_connection.db_name) != ""
-        && length(var.mysql_connection.db_security_group_ids) > 0
-        && trimspace(var.mysql_connection.secret_arn) != ""
-      )
-    )
-    error_message = "mysql_connection host, db_name, db_security_group_ids, and secret_arn are required when mysql_connection.enabled is true."
-  }
-
-  validation {
-    condition = (
-      !var.mysql_connection.enabled
-      || (var.mysql_connection.port >= 1 && var.mysql_connection.port <= 65535)
-    )
-    error_message = "mysql_connection.port must be between 1 and 65535 when mysql_connection.enabled is true."
-  }
 }

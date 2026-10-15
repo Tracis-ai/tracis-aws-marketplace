@@ -33,7 +33,7 @@ module "agentcore_runtime_role" {
   }
 
   create_inline_policy = true
-  inline_policy_permissions = merge({
+  inline_policy_permissions = {
     AgentCoreRuntimeEcrAuthorization = {
       effect    = "Allow"
       actions   = ["ecr:GetAuthorizationToken"]
@@ -157,13 +157,5 @@ module "agentcore_runtime_role" {
       ]
       resources = ["*"]
     }
-    },
-    length(local.enabled_db_secret_arns) > 0 ? {
-      DatabaseSecretRetrieval = {
-        effect    = "Allow"
-        actions   = ["secretsmanager:GetSecretValue"]
-        resources = local.enabled_db_secret_arns
-      }
-    } : {},
-  )
+  }
 }

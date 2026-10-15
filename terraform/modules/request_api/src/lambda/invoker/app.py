@@ -4,6 +4,7 @@ import logging
 import os
 import urllib.error
 import urllib.request
+from http import HTTPStatus
 
 import boto3
 from botocore.auth import SigV4Auth
@@ -54,6 +55,9 @@ def lambda_handler(event, _):
             response_text = invoke_agent(request_context)
         except Exception as e:
             logger.exception("Failed to invoke Agent API: %s", e)
+            response_text = "リクエストが失敗しました。"
+
+        if response_text is None:
             batch_item_failures.append(
                 {"itemIdentifier": request_message_id},
             )
@@ -107,7 +111,7 @@ def parse_request_body(request_body: str) -> dict | None:
     }
 
 
-def invoke_agent(request_context: dict) -> str:
+def invoke_agent(request_context: dict) -> str | None:
     payload = {
         "prompt": request_context["user_prompt"],
     }
@@ -147,17 +151,37 @@ def invoke_agent(request_context: dict) -> str:
         ) as response:
             response_body = response.read().decode("utf-8")
     except urllib.error.HTTPError as e:
-        error_body = e.read().decode("utf-8")
-        raise RuntimeError(f"Agent API error: status={e.code}, body={error_body}")
-    if not response_body:
-        raise RuntimeError("Agent API response body is empty")
+        with e:
+            error_body = e.read().decode("utf-8", errors="replace")
+
+        retryable_status = e.code in (
+            HTTPStatus.REQUEST_TIMEOUT,
+            HTTPStatus.TOO_MANY_REQUESTS,
+            HTTPStatus.GATEWAY_TIMEOUT,
+        )
+        retryable_conflict = (
+            e.code == HTTPStatus.CONFLICT
+            and e.headers.get("x-amzn-ErrorType", "").split(":", 1)[0]
+            == "RetryableConflictException"
+        )
+        if retryable_status or retryable_conflict:
+            logger.warning("Request will be retried: status=%s", e.code)
+            return None
+
+        logger.warning(
+            "Agent API request rejected: status=%s, reason=%s, body=%s",
+            e.code,
+            e.reason,
+            error_body,
+        )
+        return "リクエストが失敗しました。"
 
     try:
         queue_message = json.loads(response_body)
-    except json.JSONDecodeError as e:
-        raise RuntimeError("Agent API response body is not JSON") from e
-
-    return parse_agent_response(queue_message)
+        return parse_agent_response(queue_message)
+    except (json.JSONDecodeError, RuntimeError) as e:
+        logger.exception("Failed to read Agent API response: %s", e)
+        return "回答を受け取れませんでした。"
 
 
 def parse_agent_response(response_message: dict) -> str:
@@ -165,10 +189,10 @@ def parse_agent_response(response_message: dict) -> str:
         raise RuntimeError("Agent API response body is not an object")
 
     response = response_message.get("response")
-    if not response:
+    if not isinstance(response, str) or not response:
         raise RuntimeError("Agent API response does not contain response")
 
-    return str(response)
+    return response
 
 
 def queue_response(

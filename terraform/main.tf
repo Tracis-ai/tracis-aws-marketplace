@@ -17,6 +17,12 @@ resource "aws_secretsmanager_secret_version" "chat_tools" {
     CHATWORK_WEBHOOK_TOKEN = ""
     CHATWORK_API_TOKEN     = ""
   })
+
+  lifecycle {
+    ignore_changes = [
+      secret_string,
+    ]
+  }
 }
 
 # Secrets Manager secrets for MySQL credentials if not provided
@@ -34,6 +40,12 @@ resource "aws_secretsmanager_secret_version" "mysql" {
     username = ""
     password = ""
   })
+
+  lifecycle {
+    ignore_changes = [
+      secret_string,
+    ]
+  }
 }
 
 # Main agent module
@@ -41,7 +53,6 @@ module "agent" {
   source = "./modules/tracis_agentcore"
 
   prefix              = var.prefix
-  subnet_ids          = local.subnet_ids
   container_image_url = local.effective_agent_image_url
   model_config = {
     bedrock_model_id       = var.bedrock_model_id
@@ -50,6 +61,18 @@ module "agent" {
     enable_guardrail_trace = "enabled"
   }
   pii_output_entity_types = local.pii_output_entity_types
+  gateway_tools_config = {
+    enabled_tools = module.tools.enabled_tools
+    gateway_url   = module.tools.gateway_url
+  }
+}
+
+module "tools" {
+  source = "./modules/tools"
+
+  prefix            = var.prefix
+  runtime_role      = module.agent.runtime_role
+  lambda_subnet_ids = local.subnet_ids
   mysql_connection = {
     enabled               = local.enable_mysql_connection
     host                  = var.mysql_endpoint
@@ -60,6 +83,9 @@ module "agent" {
       local.mysql_secret_arn,
       try(aws_secretsmanager_secret.mysql[0].arn, null),
     )
+  }
+  container_image_urls = {
+    mysql = local.enable_mysql_connection ? trimspace(var.mysql_tools_image_url) : null
   }
 }
 

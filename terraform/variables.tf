@@ -4,7 +4,7 @@ variable "prefix" {
 }
 
 variable "subnet_ids" {
-  description = "Subnet IDs for ECS service"
+  description = "Subnet IDs for Tool Lambda VPC connectivity"
   type        = string
 }
 
@@ -68,4 +68,15 @@ variable "pii_output_entity_types" {
   description = "Comma-separated PII entity types to anonymize in agent output"
   type        = string
   default     = ""
+}
+
+variable "mysql_tools_image_url" {
+  description = "ECR image URL for the MySQL Tool Lambda in the deployment Region"
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = trimspace(var.enabled_db_types) != "mysql" || trimspace(var.mysql_tools_image_url) != ""
+    error_message = "mysql_tools_image_url is required when MySQL is enabled."
+  }
 }

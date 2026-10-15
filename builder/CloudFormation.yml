@@ -6,9 +6,13 @@ Parameters:
     Type: String
     Default: ""
     Description: "(Optional) ECR image URL for TracisAI Agent. Specify only to use a particular image."
-  AgentSubnetIds:
+  MySqlToolsImageUrl:
+    Type: String
+    Default: ""
+    Description: "MySQL Tools ECR image URL in the deployment Region. Required when MySQL is enabled until the standard image is published and its default tag is configured."
+  ToolsSubnetIds:
     Type: List<AWS::EC2::Subnet::Id>
-    Description: "Subnet IDs for deploying TracisAI Agent."
+    Description: "Subnet IDs for Tool Lambda VPC connectivity."
   BedrockModelId:
     Type: String
     Default: "global.anthropic.claude-sonnet-4-6"
@@ -51,9 +55,9 @@ Parameters:
     Type: String
     Description: "Prefix for names of created resources. Use lowercase letters, numbers, and hyphens only; do not begin or end with a hyphen."
     MinLength: 1
-    MaxLength: 28
+    MaxLength: 20
     AllowedPattern: "[a-z0-9]([a-z0-9-]*[a-z0-9])?"
-    ConstraintDescription: "Enter up to 28 lowercase letters, numbers, and hyphens; do not begin or end with a hyphen."
+    ConstraintDescription: "Enter up to 20 lowercase letters, numbers, and hyphens; do not begin or end with a hyphen."
   ChatToolsSecretArn:
     Type: String
     Default: ""
@@ -65,7 +69,7 @@ Parameters:
 Mappings:
   ReleaseConfig:
     Current:
-      SourceVersion: "v202608-f9f20a7dd8cc"
+      SourceVersion: "v202610-e47c5a151dde"
 
 Conditions:
   SourceVersionNotSpecified: !Equals
@@ -107,6 +111,26 @@ Resources:
       RepositoryName: !Sub "${Prefix}-tracis-ai-agent-image-repo"
       EmptyOnDelete: true
       ImageTagMutability: IMMUTABLE
+
+  MySqlToolsImageMirrorRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub "${Prefix}-tracis-ai-mysql-tools-image-repo"
+      EmptyOnDelete: true
+      ImageTagMutability: IMMUTABLE
+      RepositoryPolicyText:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: LambdaImageRetrieval
+            Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - ecr:BatchGetImage
+              - ecr:GetDownloadUrlForLayer
+            Condition:
+              ArnLike:
+                "aws:SourceArn": !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${Prefix}-tracis-ai-mysql-tool-function"
 
   CodeBuildServiceRole:
     Type: AWS::IAM::Role
@@ -157,13 +181,21 @@ Resources:
                 Effect: Allow
                 Action: ecr:GetAuthorizationToken
                 Resource: "*"
-              - Sid: PullAgentSourceImage
+              - Sid: PullSourceImages
                 Effect: Allow
                 Action:
                   - ecr:BatchCheckLayerAvailability
                   - ecr:BatchGetImage
                   - ecr:GetDownloadUrlForLayer
-                Resource: "arn:aws:ecr:us-east-1:709825985650:repository/btm/tracisai-free"
+                Resource:
+                  - "arn:aws:ecr:us-east-1:709825985650:repository/btm/tracisai-free"
+                  - "arn:aws:ecr:us-east-1:709825985650:repository/btm/tracisai-mysql-tools"
+              - Sid: PullMySqlToolsMirrorImage
+                Effect: Allow
+                Action:
+                  - ecr:BatchGetImage
+                  - ecr:GetDownloadUrlForLayer
+                Resource: !GetAtt MySqlToolsImageMirrorRepository.Arn
               - Sid: PushMirrorImage
                 Effect: Allow
                 Action:
@@ -173,7 +205,9 @@ Resources:
                   - ecr:InitiateLayerUpload
                   - ecr:PutImage
                   - ecr:UploadLayerPart
-                Resource: !GetAtt AgentImageMirrorRepository.Arn
+                Resource:
+                  - !GetAtt AgentImageMirrorRepository.Arn
+                  - !GetAtt MySqlToolsImageMirrorRepository.Arn
         - PolicyName: ComputeAndNetworkResourcePolicy
           PolicyDocument:
             Version: "2012-10-17"
@@ -256,6 +290,8 @@ Resources:
               - Sid: AgentCoreGlobalAccess
                 Effect: Allow
                 Action:
+                  - bedrock-agentcore:CreateGateway
+                  - bedrock-agentcore:ListGateways
                   - bedrock-agentcore:CreateAgentRuntime
                   - bedrock-agentcore:CreateAgentRuntimeEndpoint
                   - bedrock-agentcore:ListAgentRuntimeEndpoints
@@ -284,6 +320,24 @@ Resources:
                   - !Sub "arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:runtime/*/runtime-endpoint/*"
                   - !Sub "arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:workload-identity-directory/default"
                   - !Sub "arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:workload-identity-directory/default/workload-identity/*"
+              - Sid: AgentCoreGatewayAccess
+                Effect: Allow
+                Action:
+                  - bedrock-agentcore:GetGateway
+                  - bedrock-agentcore:UpdateGateway
+                  - bedrock-agentcore:DeleteGateway
+                  - bedrock-agentcore:CreateGatewayTarget
+                  - bedrock-agentcore:GetGatewayTarget
+                  - bedrock-agentcore:UpdateGatewayTarget
+                  - bedrock-agentcore:DeleteGatewayTarget
+                  - bedrock-agentcore:ListGatewayTargets
+                  - bedrock-agentcore:GetResourcePolicy
+                  - bedrock-agentcore:PutResourcePolicy
+                  - bedrock-agentcore:DeleteResourcePolicy
+                  - bedrock-agentcore:ListTagsForResource
+                  - bedrock-agentcore:TagResource
+                  - bedrock-agentcore:UntagResource
+                Resource: !Sub "arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:gateway/*"
               - Sid: CloudWatchLogsGroupAccess
                 Effect: Allow
                 Action: logs:*
@@ -330,7 +384,9 @@ Resources:
                 Action:
                   - iam:GetPolicy
                   - iam:GetPolicyVersion
-                Resource: !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaENIManagementAccess"
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaENIManagementAccess"
+                  - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
               - Sid: IAMServiceLinkedRoleAccess
                 Effect: Allow
                 Action:
@@ -372,47 +428,53 @@ Resources:
     Type: AWS::CodeBuild::Project
     Properties:
       Name: !Sub "${Prefix}-tracis-deploy-agent"
+      ConcurrentBuildLimit: 1
+      TimeoutInMinutes: 60
       ServiceRole: !GetAtt CodeBuildServiceRole.Arn
       Artifacts:
         Type: NO_ARTIFACTS
       Environment:
         Type: ARM_CONTAINER
         ComputeType: BUILD_GENERAL1_SMALL
-        Image: aws/codebuild/amazonlinux-aarch64-standard:3.0
+        Image: aws/codebuild/amazonlinux-aarch64-standard:4.0
         PrivilegedMode: true
         EnvironmentVariables:
-          - Name: TF_STATE_BUCKET
-            Value: !Ref TfStateBucket
-          - Name: TF_ACTION
-            Value: apply
-          - Name: PREFIX
-            Value: !Ref Prefix
-          - Name: SUBNET_IDS
-            Value: !Join [",", !Ref AgentSubnetIds]
+          - Name: AGENT_IMAGE_MIRROR_REPOSITORY_URI
+            Value: !GetAtt AgentImageMirrorRepository.RepositoryUri
+          - Name: AGENT_IMAGE_URL
+            Value: !Ref AgentImageUrl
+          - Name: BEDROCK_MODEL_ID
+            Value: !Ref BedrockModelId
+          - Name: CHAT_TOOLS_SECRET_ARN
+            Value: !Ref ChatToolsSecretArn
           - Name: ENABLED_DB_TYPES
             Value: !Join [",", !Ref EnabledDbTypes]
+          - Name: MAX_TOKENS
+            Value: !Ref BedrockModelMaxTokens
+          - Name: MYSQL_DB_NAME
+            Value: !Ref MySqlDbName
           - Name: MYSQL_ENDPOINT
             Value: !Ref MySqlEndpoint
           - Name: MYSQL_PORT
             Value: !Ref MySqlPort
-          - Name: MYSQL_DB_NAME
-            Value: !Ref MySqlDbName
-          - Name: MYSQL_SECURITY_GROUP_IDS
-            Value: !Join [",", !Ref MySqlSecurityGroupIds]
           - Name: MYSQL_SECRET_ARN
             Value: !Ref MySqlSecretArn
-          - Name: CHAT_TOOLS_SECRET_ARN
-            Value: !Ref ChatToolsSecretArn
-          - Name: AGENT_IMAGE_URL
-            Value: !Ref AgentImageUrl
-          - Name: AGENT_IMAGE_MIRROR_REPOSITORY_URI
-            Value: !GetAtt AgentImageMirrorRepository.RepositoryUri
-          - Name: BEDROCK_MODEL_ID
-            Value: !Ref BedrockModelId
-          - Name: MAX_TOKENS
-            Value: !Ref BedrockModelMaxTokens
+          - Name: MYSQL_SECURITY_GROUP_IDS
+            Value: !Join [",", !Ref MySqlSecurityGroupIds]
+          - Name: MYSQL_TOOLS_IMAGE_MIRROR_REPOSITORY_URI
+            Value: !GetAtt MySqlToolsImageMirrorRepository.RepositoryUri
+          - Name: MYSQL_TOOLS_IMAGE_URL
+            Value: !Ref MySqlToolsImageUrl
           - Name: PII_OUTPUT_ENTITY_TYPES
             Value: !Join [",", !Ref PiiOutputEntityTypes]
+          - Name: PREFIX
+            Value: !Ref Prefix
+          - Name: TF_ACTION
+            Value: apply
+          - Name: TF_STATE_BUCKET
+            Value: !Ref TfStateBucket
+          - Name: TOOLS_SUBNET_IDS
+            Value: !Join [",", !Ref ToolsSubnetIds]
       LogsConfig:
         CloudWatchLogs:
           Status: ENABLED
@@ -437,45 +499,49 @@ Resources:
     Type: AWS::CodeBuild::Project
     Properties:
       Name: !Sub "${Prefix}-tracis-delete-agent"
+      ConcurrentBuildLimit: 1
+      TimeoutInMinutes: 60
       ServiceRole: !GetAtt CodeBuildServiceRole.Arn
       Artifacts:
         Type: NO_ARTIFACTS
       Environment:
-        Type: ARM_LAMBDA_CONTAINER
-        ComputeType: BUILD_LAMBDA_2GB
-        Image: aws/codebuild/amazonlinux-aarch64-lambda-standard:python3.13
+        Type: ARM_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux-aarch64-standard:4.0
         PrivilegedMode: false
         EnvironmentVariables:
-          - Name: TF_STATE_BUCKET
-            Value: !Ref TfStateBucket
-          - Name: TF_ACTION
-            Value: destroy
-          - Name: PREFIX
-            Value: !Ref Prefix
-          - Name: SUBNET_IDS
-            Value: !Join [",", !Ref AgentSubnetIds]
+          - Name: AGENT_IMAGE_URL
+            Value: !Ref AgentImageUrl
+          - Name: BEDROCK_MODEL_ID
+            Value: !Ref BedrockModelId
+          - Name: CHAT_TOOLS_SECRET_ARN
+            Value: !Ref ChatToolsSecretArn
           - Name: ENABLED_DB_TYPES
             Value: ""
+          - Name: MAX_TOKENS
+            Value: !Ref BedrockModelMaxTokens
+          - Name: MYSQL_DB_NAME
+            Value: !Ref MySqlDbName
           - Name: MYSQL_ENDPOINT
             Value: !Ref MySqlEndpoint
           - Name: MYSQL_PORT
             Value: !Ref MySqlPort
-          - Name: MYSQL_DB_NAME
-            Value: !Ref MySqlDbName
-          - Name: MYSQL_SECURITY_GROUP_IDS
-            Value: !Join [",", !Ref MySqlSecurityGroupIds]
           - Name: MYSQL_SECRET_ARN
             Value: !Ref MySqlSecretArn
-          - Name: CHAT_TOOLS_SECRET_ARN
-            Value: !Ref ChatToolsSecretArn
-          - Name: BEDROCK_MODEL_ID
-            Value: !Ref BedrockModelId
-          - Name: MAX_TOKENS
-            Value: !Ref BedrockModelMaxTokens
+          - Name: MYSQL_SECURITY_GROUP_IDS
+            Value: !Join [",", !Ref MySqlSecurityGroupIds]
+          - Name: MYSQL_TOOLS_IMAGE_URL
+            Value: !Ref MySqlToolsImageUrl
           - Name: PII_OUTPUT_ENTITY_TYPES
             Value: !Join [",", !Ref PiiOutputEntityTypes]
-          - Name: AGENT_IMAGE_URL
-            Value: !Ref AgentImageUrl
+          - Name: PREFIX
+            Value: !Ref Prefix
+          - Name: TF_ACTION
+            Value: destroy
+          - Name: TF_STATE_BUCKET
+            Value: !Ref TfStateBucket
+          - Name: TOOLS_SUBNET_IDS
+            Value: !Join [",", !Ref ToolsSubnetIds]
       LogsConfig:
         CloudWatchLogs:
           Status: ENABLED

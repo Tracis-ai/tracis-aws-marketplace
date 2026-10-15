@@ -1,0 +1,119 @@
+[
+  {
+    "name": "list_tables",
+    "description": "Lists the readable tables and views in the configured MySQL database",
+    "inputSchema": {
+      "type": "object",
+      "description": "No input is required",
+      "properties": {},
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "describe_table",
+    "description": "Returns column metadata for an allowed table or view in the configured MySQL database",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "table_name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Exact table or view name returned by list_tables"
+        }
+      },
+      "required": ["table_name"],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "select_rows",
+    "description": "Reads rows from one MySQL table or view using validated columns, AND filters, ordering, and a bounded limit. Raw SQL, joins, functions, aggregation, and subqueries are not accepted. Use only tables and columns documented in the knowledge base and returned by the metadata tools.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "table": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Exact table or view name documented in the knowledge base and returned by list_tables"
+        },
+        "columns": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 200,
+          "uniqueItems": true,
+          "description": "Columns to return; SELECT * is not supported",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "filters": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20,
+          "description": "Filters combined with AND",
+          "items": {
+            "type": "object",
+            "properties": {
+              "column": {
+                "type": "string",
+                "minLength": 1
+              },
+              "operator": {
+                "type": "string",
+                "enum": [
+                  "eq",
+                  "in",
+                  "gt",
+                  "gte",
+                  "lt",
+                  "lte",
+                  "is_null",
+                  "is_not_null"
+                ]
+              },
+              "operands": {
+                "type": "array",
+                "maxItems": 100,
+                "description": "Comparison values: exactly one for eq, gt, gte, lt, or lte; one to 100 for in; empty for is_null or is_not_null",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": ["column", "operator", "operands"],
+            "additionalProperties": false
+          }
+        },
+        "order_by": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 10,
+          "description": "Deterministic row ordering",
+          "items": {
+            "type": "object",
+            "properties": {
+              "column": {
+                "type": "string",
+                "minLength": 1
+              },
+              "direction": {
+                "type": "string",
+                "enum": ["asc", "desc"]
+              }
+            },
+            "required": ["column", "direction"],
+            "additionalProperties": false
+          }
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Maximum rows to return; must not exceed the Lambda-configured maximum"
+        }
+      },
+      "required": ["table", "columns", "filters", "order_by", "limit"],
+      "additionalProperties": false
+    }
+  }
+]

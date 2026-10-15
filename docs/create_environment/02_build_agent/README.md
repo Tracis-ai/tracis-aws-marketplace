@@ -16,14 +16,24 @@
 
 エージェント関連リソースの初期構築では、主に以下のリソースが作成されます（プレフィックスは CloudFormation スタックで指定した `Prefix` 値が使用されます）。
 
-### エージェント実行基盤（AgentCore Runtime / ネットワーク）
+### エージェント実行基盤（AgentCore Runtime）
 
 | 種別                 | リソース名（例）                            | 用途                                                                                                                       |
 | :------------------- | :------------------------------------------ | :------------------------------------------------------------------------------------------------------------------------- |
 | AgentCore Runtime    | `[prefix]_tracis_ai_agent`                  | TracisAI Agent を実行する AgentCore Runtime。Prefix 内のハイフンはアンダースコアに置換され、Runtime 名は最大 48 文字です。 |
-| セキュリティグループ | `[prefix]-tracis-ai-agentcore-runtime-sg`   | AgentCore Runtime から AWS サービスおよび接続先 DB へ通信するためのセキュリティグループ                                    |
 | IAM ロール           | `[prefix]-tracis-ai-agentcore-runtime-role` | AgentCore Runtime が ECR、Bedrock、Secrets Manager などへアクセスする実行ロール                                            |
 | Bedrock Guardrail    | `[prefix]-tracis-ai-guardrail`              | エージェントの入出力に対する Guardrail                                                                                     |
+
+### MySQL Tool（MySQL を有効にした場合）
+
+| 種別 | リソース名（例） | 用途 |
+| :--- | :--- | :--- |
+| AgentCore Gateway | `[prefix]-tracis-ai-tools-gateway` | Runtime から SigV4 / IAM 認証で MySQL Tool を呼び出す入口 |
+| Lambda | `[prefix]-tracis-ai-mysql-tool-function` | VPC 内で MySQL に接続し、SQL Guard を適用してクエリを実行 |
+| セキュリティグループ | `[prefix]-tracis-ai-mysql-tool-function-sg` | MySQL Tool Lambda の DB・AWS API 接続用 |
+| IAM ロール | `[prefix]-tracis-ai-mysql-tool-function-role` | MySQL Secret の読み取りと VPC 接続用 |
+
+Runtime は PUBLIC mode で動作します。DB 接続と MySQL Secret の読み取りは Tool Lambda が担当し、指定した DB セキュリティグループに Tool Lambda からの接続ルールを追加します。
 
 ### チャット受信基盤
 
@@ -52,6 +62,16 @@
 | :--------------------- | :-------------------------------------------------------------------------- | :----------------------------------------------------------------------------------------------------------------------------- |
 | Secrets Manager Secret | `[prefix]-tracis-chat-tools-credentials-XXXXXXXX`<br>※ 末尾はランダム文字列 | チャットツール認証情報（`SLACK_SIGNING_SECRET` / `SLACK_BOT_TOKEN` / `CHATWORK_WEBHOOK_TOKEN` / `CHATWORK_API_TOKEN`）の格納先 |
 | Secrets Manager Secret | `[prefix]-tracis-mysql-credentials-XXXXXXXX`<br>※ 末尾はランダム文字列      | MySQL 接続用の `username` / `password` の格納先<br>※ MySQL を利用する場合                                                      |
+
+## MySQL 利用時のアクセス範囲
+
+MySQL Tool は環境共通の DB 認証情報を使用します。チャット利用者ごとのテーブル・行の認可は行わず、SQL Guard はクエリ構造を制限します。DB ユーザーが参照できるデータは、bot を利用できるメンバーが取得でき、応答先の Slack channel / Chatwork room のメンバーにも表示されます。
+
+MySQL を有効にする前に、次の条件を満たしてください。
+
+- Tool 専用の DB ユーザーを作成し、共有してよいテーブル・列だけに必要最小限の SELECT 権限を付与する。管理者やアプリケーション用の DB 認証情報は使用しない
+- bot の利用者と応答先の全メンバーに、その参照範囲のデータを閲覧する権限があることを確認する
+- 利用者ごとに参照範囲を分ける必要がある環境では、MySQL を有効にしない
 
 ## CodeBuild 実行手順
 

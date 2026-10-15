@@ -7,13 +7,19 @@ output "agentcore_runtime" {
   }
 }
 
+output "runtime_role" {
+  description = "AgentCore Runtime execution role used by dependent infrastructure"
+  value = {
+    arn  = module.agentcore_runtime_role.arn
+    name = module.agentcore_runtime_role.name
+  }
+}
+
 output "agent_api" {
   description = "Agent invocation configuration used by the request API module"
   value = {
-    invocation_url    = "https://bedrock-agentcore.${data.aws_region.current.region}.amazonaws.com/runtimes/${urlencode(aws_bedrockagentcore_agent_runtime.this.agent_runtime_arn)}/invocations?qualifier=DEFAULT"
-    port              = local.agent_api.port
-    security_group_id = aws_security_group.agentcore_runtime.id
-    subnet_ids        = var.subnet_ids
+    invocation_url = "https://bedrock-agentcore.${data.aws_region.current.region}.amazonaws.com/runtimes/${urlencode(aws_bedrockagentcore_agent_runtime.this.agent_runtime_arn)}/invocations?qualifier=DEFAULT"
+    port           = 8080
   }
 }
 

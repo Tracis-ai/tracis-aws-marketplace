@@ -19,12 +19,22 @@ phases:
   pre_build:
     commands:
       - |
-        source "$(git rev-parse --show-toplevel)/builder/agent_image_replication.sh"
+        set -euo pipefail
+        source "$(git rev-parse --show-toplevel)/builder/container_images_replication.sh"
         if [ "${TF_ACTION}" = "apply" ]; then
           docker version
-          AGENT_IMAGE_URL="$(prepare_agent_image "${AGENT_IMAGE_URL}" "${AGENT_IMAGE_MIRROR_REPOSITORY_URI:-}" "${AWS_REGION}")"
+          AGENT_IMAGE_URL="$(prepare_image agent "${AGENT_IMAGE_URL}" "${AGENT_IMAGE_MIRROR_REPOSITORY_URI:-}" "${AWS_REGION}")"
+          if [ "${ENABLED_DB_TYPES}" = "mysql" ]; then
+            MYSQL_TOOLS_IMAGE_URL="$(prepare_image mysql_tools "${MYSQL_TOOLS_IMAGE_URL:-}" "${MYSQL_TOOLS_IMAGE_MIRROR_REPOSITORY_URI:-}" "${AWS_REGION}")"
+          else
+            MYSQL_TOOLS_IMAGE_URL=""
+          fi
         elif [ "${TF_ACTION}" = "destroy" ]; then
-          AGENT_IMAGE_URL="$(resolve_agent_image_url "${AGENT_IMAGE_URL}")"
+          AGENT_IMAGE_URL="$(resolve_image_url agent "${AGENT_IMAGE_URL}")"
+          MYSQL_TOOLS_IMAGE_URL="$(resolve_image_url mysql_tools "${MYSQL_TOOLS_IMAGE_URL:-}")"
+        else
+          echo "Unsupported TF_ACTION: ${TF_ACTION}" >&2
+          exit 1
         fi
       - cd ${TF_EXEC_PATH}
       - echo Initializing Terraform...
@@ -43,7 +53,7 @@ phases:
         AGENTCORE_RUNTIME_SG_ADDRESS="module.agent.aws_security_group.agentcore_runtime"
         TF_VAR_ARGS=(
           -var="prefix=${PREFIX}" \
-          -var="subnet_ids=${SUBNET_IDS}" \
+          -var="subnet_ids=${TOOLS_SUBNET_IDS}" \
           -var="enabled_db_types=${ENABLED_DB_TYPES}" \
           -var="mysql_endpoint=${MYSQL_ENDPOINT}" \
           -var="mysql_port=${MYSQL_PORT}" \
@@ -54,65 +64,33 @@ phases:
           -var="bedrock_model_id=${BEDROCK_MODEL_ID}" \
           -var="max_tokens=${MAX_TOKENS}" \
           -var="pii_output_entity_types=${PII_OUTPUT_ENTITY_TYPES}" \
-          -var="agent_image_url=${AGENT_IMAGE_URL}"
+          -var="agent_image_url=${AGENT_IMAGE_URL}" \
+          -var="mysql_tools_image_url=${MYSQL_TOOLS_IMAGE_URL}"
         )
 
-        if [ "${TF_ACTION}" = "apply" ]; then
-          # Reuse the AgentCore Runtime SG retained while its VPC ENI is released.
-          if ! TF_STATE_RESOURCES="$(terraform state list 2>terraform-state-list.err)"; then
-            if grep -Fq "No state file was found!" terraform-state-list.err; then
-              TF_STATE_RESOURCES=""
-            else
-              cat terraform-state-list.err >&2
-              exit 1
-            fi
+        # AgentCore VPC ENIs can block the former Runtime SG deletion during apply or destroy.
+        # Retain this SG only after its configured deletion timeout expires.
+        TF_EXEC_LOG="terraform-${TF_ACTION}.log"
+        set +e
+        terraform "${TF_ACTION}" -no-color -auto-approve "${TF_VAR_ARGS[@]}" 2>&1 | tee "${TF_EXEC_LOG}"
+        TF_EXEC_EXIT_CODE=${PIPESTATUS[0]}
+        set -e
+
+        if [ "${TF_EXEC_EXIT_CODE}" -ne 0 ]; then
+          RETAINED_RUNTIME_SG_ID=$(awk -v address="${AGENTCORE_RUNTIME_SG_ADDRESS}" '
+            index($0, address ": Destroying") == 1 {
+              sub(/.*\[id=/, ""); sub(/\].*/, ""); print; exit
+            }
+          ' "${TF_EXEC_LOG}")
+          if [ -n "${RETAINED_RUNTIME_SG_ID}" ] \
+            && grep -F "Error: deleting Security Group (${RETAINED_RUNTIME_SG_ID})" "${TF_EXEC_LOG}" \
+              | grep -Eq "DependencyViolation|timeout while waiting for state to become 'destroyed'"; then
+            echo "Retaining AgentCore Runtime SG until the service-managed ENI is released..."
+            terraform state rm "${AGENTCORE_RUNTIME_SG_ADDRESS}"
+            terraform "${TF_ACTION}" -no-color -auto-approve "${TF_VAR_ARGS[@]}"
+          else
+            exit "${TF_EXEC_EXIT_CODE}"
           fi
-
-          if ! grep -Fxq "${AGENTCORE_RUNTIME_SG_ADDRESS}" <<< "${TF_STATE_RESOURCES}"; then
-            IFS=',' read -r -a SUBNET_ID_ARRAY <<< "${SUBNET_IDS}"
-            AGENTCORE_RUNTIME_VPC_ID="$(aws ec2 describe-subnets \
-              --subnet-ids "${SUBNET_ID_ARRAY[@]}" \
-              --query 'Subnets[0].VpcId' \
-              --output text)"
-            AGENTCORE_RUNTIME_SG_ID="$(aws ec2 describe-security-groups \
-              --filters \
-                "Name=group-name,Values=${PREFIX}-tracis-ai-agentcore-runtime-sg" \
-                "Name=vpc-id,Values=${AGENTCORE_RUNTIME_VPC_ID}" \
-              --query 'SecurityGroups[0].GroupId' \
-              --output text)"
-
-            if [ "${AGENTCORE_RUNTIME_SG_ID}" != "None" ] && [ -n "${AGENTCORE_RUNTIME_SG_ID}" ]; then
-              echo "Importing retained AgentCore Runtime SG ${AGENTCORE_RUNTIME_SG_ID}..."
-              terraform import \
-                -input=false \
-                "${TF_VAR_ARGS[@]}" \
-                "${AGENTCORE_RUNTIME_SG_ADDRESS}" \
-                "${AGENTCORE_RUNTIME_SG_ID}"
-            fi
-          fi
-        fi
-
-        if [ "${TF_ACTION}" = "destroy" ]; then
-          # AgentCore VPC ENIs can outlive Runtime deletion and block SG deletion.
-          # Retain this SG only after its configured deletion timeout expires.
-          set +e
-          terraform destroy -auto-approve "${TF_VAR_ARGS[@]}" 2>&1 | tee terraform-destroy.log
-          TF_DESTROY_EXIT_CODE=${PIPESTATUS[0]}
-          set -e
-
-          if [ "${TF_DESTROY_EXIT_CODE}" -ne 0 ]; then
-            if grep -Eq "Error:.*deleting Security Group" terraform-destroy.log \
-              && grep -Fq "${AGENTCORE_RUNTIME_SG_ADDRESS}" terraform-destroy.log \
-              && grep -Eq "DependencyViolation|timeout while waiting for state to become 'destroyed'" terraform-destroy.log; then
-              echo "Retaining AgentCore Runtime SG until the service-managed ENI is released..."
-              terraform state rm "${AGENTCORE_RUNTIME_SG_ADDRESS}"
-              terraform destroy -auto-approve "${TF_VAR_ARGS[@]}"
-            else
-              exit "${TF_DESTROY_EXIT_CODE}"
-            fi
-          fi
-        else
-          terraform "${TF_ACTION}" -auto-approve "${TF_VAR_ARGS[@]}"
         fi
 
         if [ "${TF_ACTION}" = "destroy" ]; then

@@ -157,6 +157,6 @@ data "aws_iam_policy_document" "kb_logging" {
 }
 
 resource "aws_cloudwatch_log_resource_policy" "kb_logging" {
-  policy_name     = "${aws_bedrockagent_knowledge_base.this.name}-logging-policy"
   policy_document = data.aws_iam_policy_document.kb_logging.json
+  resource_arn    = aws_cloudwatch_log_group.kb.arn
 }
