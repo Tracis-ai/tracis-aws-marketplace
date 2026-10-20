@@ -69,7 +69,7 @@ Parameters:
 Mappings:
   ReleaseConfig:
     Current:
-      SourceVersion: "v202610-e47c5a151dde"
+      SourceVersion: "v202610-cfb62968d82b"
 
 Conditions:
   SourceVersionNotSpecified: !Equals
