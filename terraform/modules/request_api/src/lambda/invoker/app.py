@@ -52,19 +52,19 @@ def lambda_handler(event, _):
 
         logger.info("Invoking Agent API: message_id=%s", request_message_id)
         try:
-            response_text = invoke_agent(request_context)
+            response_data = invoke_agent(request_context)
         except Exception as e:
             logger.exception("Failed to invoke Agent API: %s", e)
-            response_text = "リクエストが失敗しました。"
+            response_data = {"response": "リクエストが失敗しました。"}
 
-        if response_text is None:
+        if response_data is None:
             batch_item_failures.append(
                 {"itemIdentifier": request_message_id},
             )
             continue
 
         queue_message = {
-            "response": response_text,
+            **response_data,
             **request_context,
         }
         try:
@@ -111,7 +111,7 @@ def parse_request_body(request_body: str) -> dict | None:
     }
 
 
-def invoke_agent(request_context: dict) -> str | None:
+def invoke_agent(request_context: dict) -> dict | None:
     payload = {
         "prompt": request_context["user_prompt"],
     }
@@ -174,17 +174,17 @@ def invoke_agent(request_context: dict) -> str | None:
             e.reason,
             error_body,
         )
-        return "リクエストが失敗しました。"
+        return {"response": "リクエストが失敗しました。"}
 
     try:
         queue_message = json.loads(response_body)
         return parse_agent_response(queue_message)
     except (json.JSONDecodeError, RuntimeError) as e:
         logger.exception("Failed to read Agent API response: %s", e)
-        return "回答を受け取れませんでした。"
+        return {"response": "回答を受け取れませんでした。"}
 
 
-def parse_agent_response(response_message: dict) -> str:
+def parse_agent_response(response_message: dict) -> dict:
     if not isinstance(response_message, dict):
         raise RuntimeError("Agent API response body is not an object")
 
@@ -192,7 +192,20 @@ def parse_agent_response(response_message: dict) -> str:
     if not isinstance(response, str) or not response:
         raise RuntimeError("Agent API response does not contain response")
 
-    return response
+    response_data = {"response": response}
+    ai_disclosure = response_message.get("aiDisclosure")
+    if ai_disclosure is not None:
+        if not isinstance(ai_disclosure, str):
+            raise RuntimeError("Agent API response aiDisclosure is not a string")
+        response_data["aiDisclosure"] = ai_disclosure
+
+    delivery = response_message.get("delivery")
+    if delivery is not None:
+        if not isinstance(delivery, dict):
+            raise RuntimeError("Agent API response delivery is not an object")
+        response_data["delivery"] = delivery
+
+    return response_data
 
 
 def queue_response(

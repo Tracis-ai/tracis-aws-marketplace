@@ -32,7 +32,9 @@ def dispatch_response(message: dict) -> None:
         raise ValueError("channel or thread_ts is missing for Slack response")
 
     slack_bot_token = get_slack_bot_token()
-    for message_part in build_slack_messages(response, user_prompt):
+    for message_part in build_slack_messages(
+        response, user_prompt, message.get("aiDisclosure")
+    ):
         send_with_slack_api(
             message=message_part,
             channel=channel,
@@ -59,14 +61,21 @@ def get_slack_bot_token() -> str:
     return slack_bot_token
 
 
-def build_slack_messages(response: str, user_prompt: str) -> list[str]:
+def build_slack_messages(
+    response: str, user_prompt: str, ai_disclosure: str | None = None
+) -> list[str]:
     response_text = response.replace("**", "*")
     quoted_user_prompt = "\n".join(f">{line}" for line in user_prompt.splitlines())
     text = f"{quoted_user_prompt}\n\n{response_text}"
 
+    messages = [text]
+    if ai_disclosure:
+        messages.insert(0, ai_disclosure)
+
     return [
-        text[i : i + MAX_SLACK_MESSAGE_LENGTH]
-        for i in range(0, len(text), MAX_SLACK_MESSAGE_LENGTH)
+        message[i : i + MAX_SLACK_MESSAGE_LENGTH]
+        for message in messages
+        for i in range(0, len(message), MAX_SLACK_MESSAGE_LENGTH)
     ]
 
 

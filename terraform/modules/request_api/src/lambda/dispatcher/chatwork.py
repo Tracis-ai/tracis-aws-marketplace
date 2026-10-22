@@ -43,6 +43,7 @@ def dispatch_response(message: dict) -> None:
         message_id,
         from_account_id,
         send_time,
+        message.get("aiDisclosure"),
     ):
         send_with_chatwork_api(
             message=message_part,
@@ -76,6 +77,7 @@ def build_chatwork_messages(
     message_id: int | str,
     from_account_id: int | str,
     send_time: int | str | None,
+    ai_disclosure: str | None = None,
 ) -> list[str]:
     reply_tag = f"[rp aid={from_account_id} to={room_id}-{message_id}]"
     quoted_user_prompt = (
@@ -85,9 +87,14 @@ def build_chatwork_messages(
     )
     text = f"{reply_tag}\n{quoted_user_prompt}\n\n{response}"
 
+    messages = [text]
+    if ai_disclosure:
+        messages.insert(0, f"{reply_tag}\n{ai_disclosure}")
+
     return [
-        text[i : i + MAX_CHATWORK_MESSAGE_LENGTH]
-        for i in range(0, len(text), MAX_CHATWORK_MESSAGE_LENGTH)
+        message[i : i + MAX_CHATWORK_MESSAGE_LENGTH]
+        for message in messages
+        for i in range(0, len(message), MAX_CHATWORK_MESSAGE_LENGTH)
     ]
 
 
