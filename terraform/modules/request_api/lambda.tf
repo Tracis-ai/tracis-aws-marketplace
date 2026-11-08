@@ -1,11 +1,29 @@
 data "aws_region" "current" {}
 data "aws_caller_identity" "current" {}
 
+locals {
+  auth_functions = {
+    for key, receiver in local.receiver_functions :
+    key => receiver if receiver.type == "auth"
+  }
+
+  enqueue_functions = {
+    for key, receiver in local.receiver_functions :
+    key => receiver if receiver.type == "enqueue"
+  }
+
+  sqs_consumer_functions = merge(
+    local.invoker_function,
+    local.dispatcher_function,
+  )
+}
+
 data "archive_file" "lambda_zip" {
   for_each = local.lambda_functions
 
   type        = "zip"
   source_dir  = each.value.source_dir
+  excludes    = ["**/__pycache__/**", "**/*.pyc"]
   output_path = "${path.root}/archive/request_api/${each.key}-function.zip"
 }
 
@@ -87,16 +105,6 @@ module "lambda" {
         resources = [each.value.secret_arn]
       }
     } : {},
-    each.value.type == "auth" ? {
-      "invoke-enqueue-function" = {
-        actions = [
-          "lambda:InvokeFunction",
-        ]
-        resources = [
-          "arn:aws:lambda:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:function:${local.receiver_functions["${each.value.platform}-enqueue"].name}",
-        ]
-      }
-    } : {},
     each.value.type == "enqueue" ? {
       "enqueue-request-queue" = {
         actions = [
@@ -153,13 +161,260 @@ module "lambda" {
   }
 }
 
+# Invocation permissions for Auth functions
+data "aws_iam_policy_document" "auth_function_access_boundary" {
+  for_each = local.auth_functions
+
+  statement {
+    sid     = "AllowInvocationFromApiGateway"
+    effect  = "Allow"
+    actions = ["lambda:InvokeFunction"]
+    resources = [
+      module.lambda[each.key].lambda_function_arn,
+      "${module.lambda[each.key].lambda_function_arn}:*",
+    ]
+
+    principals {
+      type        = "Service"
+      identifiers = ["apigateway.amazonaws.com"]
+    }
+
+    condition {
+      test     = "ArnEquals"
+      variable = "aws:SourceArn"
+      values = [
+        "${module.api_gateway.api_execution_arn}/$default/POST${local.request_receivers[each.value.platform].path}",
+      ]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:SourceAccount"
+      values   = [data.aws_caller_identity.current.account_id]
+    }
+  }
+
+  statement {
+    sid     = "DenyUnexpectedServicePrincipal"
+    effect  = "Deny"
+    actions = ["lambda:InvokeFunction"]
+    resources = [
+      module.lambda[each.key].lambda_function_arn,
+      "${module.lambda[each.key].lambda_function_arn}:*",
+    ]
+
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+
+    condition {
+      test     = "StringNotEquals"
+      variable = "aws:PrincipalServiceName"
+      values   = ["apigateway.amazonaws.com"]
+    }
+  }
+
+  statement {
+    sid     = "DenyUnexpectedSourceArn"
+    effect  = "Deny"
+    actions = ["lambda:InvokeFunction"]
+    resources = [
+      module.lambda[each.key].lambda_function_arn,
+      "${module.lambda[each.key].lambda_function_arn}:*",
+    ]
+
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+
+    condition {
+      test     = "ArnNotEquals"
+      variable = "aws:SourceArn"
+      values = [
+        "${module.api_gateway.api_execution_arn}/$default/POST${local.request_receivers[each.value.platform].path}",
+      ]
+    }
+  }
+
+  statement {
+    sid     = "DenyUnexpectedSourceAccount"
+    effect  = "Deny"
+    actions = ["lambda:InvokeFunction"]
+    resources = [
+      module.lambda[each.key].lambda_function_arn,
+      "${module.lambda[each.key].lambda_function_arn}:*",
+    ]
+
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+
+    condition {
+      test     = "StringNotEquals"
+      variable = "aws:SourceAccount"
+      values   = [data.aws_caller_identity.current.account_id]
+    }
+  }
+
+  statement {
+    sid     = "DenyFunctionUrl"
+    effect  = "Deny"
+    actions = ["lambda:InvokeFunctionUrl"]
+    resources = [
+      module.lambda[each.key].lambda_function_arn,
+      "${module.lambda[each.key].lambda_function_arn}:*",
+    ]
+
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+  }
+}
+
+resource "aws_lambda_resource_policy" "auth_function_access_boundary" {
+  for_each = local.auth_functions
+
+  resource_arn = module.lambda[each.key].lambda_function_arn
+  policy       = data.aws_iam_policy_document.auth_function_access_boundary[each.key].json
+}
+
+# Invocation permissions for Enqueue functions
+data "aws_iam_policy_document" "enqueue_function_access_boundary" {
+  for_each = local.enqueue_functions
+
+  statement {
+    sid     = "AllowInvocationFromAuthFunctionRole"
+    effect  = "Allow"
+    actions = ["lambda:InvokeFunction"]
+    resources = [
+      module.lambda[each.key].lambda_function_arn,
+      "${module.lambda[each.key].lambda_function_arn}:*",
+    ]
+
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+
+    condition {
+      test     = "ArnEquals"
+      variable = "aws:PrincipalArn"
+      values   = [module.lambda["${each.value.platform}-auth"].lambda_role_arn]
+    }
+  }
+
+  statement {
+    sid     = "DenyUnexpectedPrincipal"
+    effect  = "Deny"
+    actions = ["lambda:InvokeFunction"]
+    resources = [
+      module.lambda[each.key].lambda_function_arn,
+      "${module.lambda[each.key].lambda_function_arn}:*",
+    ]
+
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+
+    condition {
+      test     = "ArnNotEquals"
+      variable = "aws:PrincipalArn"
+      values   = [module.lambda["${each.value.platform}-auth"].lambda_role_arn]
+    }
+
+    condition {
+      test     = "StringNotEquals"
+      variable = "aws:PrincipalServiceName"
+      values   = ["lambda.amazonaws.com"]
+    }
+  }
+
+  statement {
+    sid     = "DenyFunctionUrl"
+    effect  = "Deny"
+    actions = ["lambda:InvokeFunctionUrl"]
+    resources = [
+      module.lambda[each.key].lambda_function_arn,
+      "${module.lambda[each.key].lambda_function_arn}:*",
+    ]
+
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+  }
+}
+
+resource "aws_lambda_resource_policy" "enqueue_function_access_boundary" {
+  for_each = local.enqueue_functions
+
+  resource_arn = module.lambda[each.key].lambda_function_arn
+  policy       = data.aws_iam_policy_document.enqueue_function_access_boundary[each.key].json
+}
+
+# Invocation permissions for SQS consumer functions (invoker / dispatcher)
+data "aws_iam_policy_document" "sqs_consumer_function_access_boundary" {
+  for_each = local.sqs_consumer_functions
+
+  statement {
+    sid     = "DenyUnexpectedServicePrincipal"
+    effect  = "Deny"
+    actions = ["lambda:InvokeFunction"]
+    resources = [
+      module.lambda[each.key].lambda_function_arn,
+      "${module.lambda[each.key].lambda_function_arn}:*",
+    ]
+
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+
+    condition {
+      test     = "StringNotEquals"
+      variable = "aws:PrincipalServiceName"
+      values   = ["lambda.amazonaws.com"]
+    }
+  }
+
+  statement {
+    sid     = "DenyFunctionUrl"
+    effect  = "Deny"
+    actions = ["lambda:InvokeFunctionUrl"]
+    resources = [
+      module.lambda[each.key].lambda_function_arn,
+      "${module.lambda[each.key].lambda_function_arn}:*",
+    ]
+
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+  }
+}
+
+resource "aws_lambda_resource_policy" "sqs_consumer_function_access_boundary" {
+  for_each = local.sqs_consumer_functions
+
+  resource_arn = module.lambda[each.key].lambda_function_arn
+  policy       = data.aws_iam_policy_document.sqs_consumer_function_access_boundary[each.key].json
+}
+
 resource "aws_lambda_event_source_mapping" "invoker_from_sqs" {
   event_source_arn        = module.sqs["request"].queue_arn
   function_name           = module.lambda["invoker"].lambda_function_name
   batch_size              = 1
   function_response_types = ["ReportBatchItemFailures"]
 
-  depends_on = [module.lambda["invoker"]]
+  depends_on = [
+    module.lambda["invoker"],
+    aws_sqs_queue_policy.sqs_massage_access,
+  ]
 }
 
 resource "aws_lambda_event_source_mapping" "dispatcher_from_sqs" {
@@ -168,5 +423,8 @@ resource "aws_lambda_event_source_mapping" "dispatcher_from_sqs" {
   batch_size              = 1
   function_response_types = ["ReportBatchItemFailures"]
 
-  depends_on = [module.lambda["dispatcher"]]
+  depends_on = [
+    module.lambda["dispatcher"],
+    aws_sqs_queue_policy.sqs_massage_access,
+  ]
 }

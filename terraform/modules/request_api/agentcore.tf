@@ -1,15 +1,3 @@
-resource "aws_lambda_permission" "from_api" {
-  for_each = {
-    for key, receiver in local.receiver_functions :
-    key => receiver if receiver.type == "auth"
-  }
-
-  action        = "lambda:InvokeFunction"
-  function_name = module.lambda[each.key].lambda_function_name
-  principal     = "apigateway.amazonaws.com"
-  source_arn    = "${module.api_gateway.api_execution_arn}/*"
-}
-
 locals {
   invocation_resource_arns = var.agentcore_config.enabled ? {
     runtime          = var.agentcore_config.runtime_arn
@@ -17,15 +5,14 @@ locals {
   } : {}
 }
 
+# Invocation permissions for AgentCore Runtime
 data "aws_iam_policy_document" "agentcore_runtime_invocation" {
   for_each = local.invocation_resource_arns
 
   statement {
-    sid    = "AllowInvokerLambda"
-    effect = "Allow"
-    actions = [
-      "bedrock-agentcore:InvokeAgentRuntime",
-    ]
+    sid       = "AllowInvokerLambda"
+    effect    = "Allow"
+    actions   = ["bedrock-agentcore:InvokeAgentRuntime"]
     resources = [each.value]
 
     principals {
@@ -35,11 +22,9 @@ data "aws_iam_policy_document" "agentcore_runtime_invocation" {
   }
 
   statement {
-    sid    = "DenyNonInvokerPrincipals"
-    effect = "Deny"
-    actions = [
-      "bedrock-agentcore:InvokeAgentRuntime",
-    ]
+    sid       = "DenyNonInvokerPrincipals"
+    effect    = "Deny"
+    actions   = ["bedrock-agentcore:InvokeAgentRuntime"]
     resources = [each.value]
 
     principals {

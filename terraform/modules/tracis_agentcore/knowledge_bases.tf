@@ -3,12 +3,83 @@ locals {
   vector_dimensions  = 1024
 }
 
+data "aws_iam_policy_document" "s3_account_boundary" {
+  statement {
+    sid    = "DenyExternalPrincipals"
+    effect = "Deny"
+
+    actions = ["s3:*"]
+    resources = [
+      "_S3_BUCKET_ARN_",
+      "_S3_BUCKET_ARN_/*",
+    ]
+
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+
+    condition {
+      test     = "StringNotEquals"
+      variable = "aws:PrincipalAccount"
+      values = [
+        data.aws_caller_identity.current.account_id,
+      ]
+    }
+
+    condition {
+      test     = "BoolIfExists"
+      variable = "aws:PrincipalIsAWSService"
+      values   = ["false"]
+    }
+  }
+
+  statement {
+    sid    = "DenyExternalServiceSources"
+    effect = "Deny"
+
+    actions = ["s3:*"]
+    resources = [
+      "_S3_BUCKET_ARN_",
+      "_S3_BUCKET_ARN_/*",
+    ]
+
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+
+    condition {
+      test     = "Bool"
+      variable = "aws:PrincipalIsAWSService"
+      values   = ["true"]
+    }
+
+    condition {
+      test     = "Null"
+      variable = "aws:SourceAccount"
+      values   = ["false"]
+    }
+
+    condition {
+      test     = "StringNotEquals"
+      variable = "aws:SourceAccount"
+      values = [
+        data.aws_caller_identity.current.account_id,
+      ]
+    }
+  }
+}
+
 module "kb_source_bucket" {
   source  = "terraform-aws-modules/s3-bucket/aws"
   version = "5.12.0"
 
   bucket        = "${var.prefix}-tracis-ai-kb-data-src-${data.aws_caller_identity.current.account_id}"
   force_destroy = true
+
+  attach_policy = true
+  policy        = data.aws_iam_policy_document.s3_account_boundary.json
 
   server_side_encryption_configuration = {
     rule = {
@@ -29,6 +100,79 @@ resource "aws_s3vectors_vector_bucket" "this" {
     sse_type    = "aws:kms"
     kms_key_arn = module.encryption_keys["kb-vectors"].key_arn
   }
+}
+
+data "aws_iam_policy_document" "s3_vectors_account_boundary" {
+  statement {
+    sid    = "DenyExternalPrincipals"
+    effect = "Deny"
+
+    actions = ["s3vectors:*"]
+    resources = [
+      aws_s3vectors_vector_bucket.this.vector_bucket_arn,
+      "${aws_s3vectors_vector_bucket.this.vector_bucket_arn}/index/*",
+    ]
+
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+
+    condition {
+      test     = "StringNotEquals"
+      variable = "aws:PrincipalAccount"
+      values = [
+        data.aws_caller_identity.current.account_id,
+      ]
+    }
+
+    condition {
+      test     = "BoolIfExists"
+      variable = "aws:PrincipalIsAWSService"
+      values   = ["false"]
+    }
+  }
+
+  statement {
+    sid    = "DenyExternalServiceSources"
+    effect = "Deny"
+
+    actions = ["s3vectors:*"]
+    resources = [
+      aws_s3vectors_vector_bucket.this.vector_bucket_arn,
+      "${aws_s3vectors_vector_bucket.this.vector_bucket_arn}/index/*",
+    ]
+
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+
+    condition {
+      test     = "Bool"
+      variable = "aws:PrincipalIsAWSService"
+      values   = ["true"]
+    }
+
+    condition {
+      test     = "Null"
+      variable = "aws:SourceAccount"
+      values   = ["false"]
+    }
+
+    condition {
+      test     = "StringNotEquals"
+      variable = "aws:SourceAccount"
+      values = [
+        data.aws_caller_identity.current.account_id,
+      ]
+    }
+  }
+}
+
+resource "aws_s3vectors_vector_bucket_policy" "s3_vectors_account_boundary" {
+  vector_bucket_arn = aws_s3vectors_vector_bucket.this.vector_bucket_arn
+  policy            = data.aws_iam_policy_document.s3_vectors_account_boundary.json
 }
 
 resource "aws_s3vectors_index" "this" {
@@ -129,11 +273,14 @@ data "aws_iam_policy_document" "kb_logging" {
   statement {
     sid    = "AWSLogDeliveryWrite"
     effect = "Allow"
+
     actions = [
       "logs:CreateLogStream",
       "logs:PutLogEvents",
     ]
-    resources = ["${aws_cloudwatch_log_group.kb.arn}:log-stream:*"]
+    resources = [
+      "${aws_cloudwatch_log_group.kb.arn}:log-stream:*",
+    ]
 
     principals {
       type        = "Service"
@@ -143,7 +290,9 @@ data "aws_iam_policy_document" "kb_logging" {
     condition {
       test     = "StringEquals"
       variable = "aws:SourceAccount"
-      values   = [data.aws_caller_identity.current.account_id]
+      values = [
+        data.aws_caller_identity.current.account_id,
+      ]
     }
 
     condition {

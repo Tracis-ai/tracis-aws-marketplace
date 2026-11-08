@@ -12,6 +12,71 @@ module "tool_functions" {
   mysql_connection = var.mysql_connection
 }
 
+data "aws_iam_policy_document" "tool_access_boundary" {
+  for_each = local.enabled_tool_configs
+
+  statement {
+    sid    = "AllowGatewayInvocation"
+    effect = "Allow"
+
+    actions = ["lambda:InvokeFunction"]
+    resources = [
+      "${module.tool_functions.functions[each.key].arn}",
+      "${module.tool_functions.functions[each.key].arn}:*",
+    ]
+
+    principals {
+      type        = "AWS"
+      identifiers = ["${module.gateway_role.arn}"]
+    }
+  }
+
+  statement {
+    sid    = "DenyInvocationExceptGateway"
+    effect = "Deny"
+
+    actions = ["lambda:InvokeFunction"]
+    resources = [
+      "${module.tool_functions.functions[each.key].arn}",
+      "${module.tool_functions.functions[each.key].arn}:*",
+    ]
+
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+
+    condition {
+      test     = "ArnNotEquals"
+      variable = "aws:PrincipalArn"
+      values   = ["${module.gateway_role.arn}"]
+    }
+  }
+
+  statement {
+    sid    = "DenyFunctionUrl"
+    effect = "Deny"
+
+    actions = ["lambda:InvokeFunctionUrl"]
+    resources = [
+      "${module.tool_functions.functions[each.key].arn}",
+      "${module.tool_functions.functions[each.key].arn}:*",
+    ]
+
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+  }
+}
+
+resource "aws_lambda_resource_policy" "tool_access_boundary" {
+  for_each = local.enabled_tool_configs
+
+  resource_arn = module.tool_functions.functions[each.key].arn
+  policy       = data.aws_iam_policy_document.tool_access_boundary[each.key].json
+}
+
 module "tool_function_security_groups" {
   source   = "terraform-aws-modules/security-group/aws"
   version  = "6.0.0"

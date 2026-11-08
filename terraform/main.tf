@@ -48,6 +48,84 @@ resource "aws_secretsmanager_secret_version" "mysql" {
   }
 }
 
+data "aws_iam_policy_document" "secret_account_boundary" {
+  statement {
+    sid    = "DenyExternalPrincipals"
+    effect = "Deny"
+
+    actions   = ["secretsmanager:*"]
+    resources = ["*"]
+
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+
+    condition {
+      test     = "StringNotEquals"
+      variable = "aws:PrincipalAccount"
+      values = [
+        data.aws_caller_identity.current.account_id,
+      ]
+    }
+
+    condition {
+      test     = "BoolIfExists"
+      variable = "aws:PrincipalIsAWSService"
+      values   = ["false"]
+    }
+  }
+
+  statement {
+    sid    = "DenyExternalServiceSources"
+    effect = "Deny"
+
+    actions   = ["secretsmanager:*"]
+    resources = ["*"]
+
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+
+    condition {
+      test     = "Bool"
+      variable = "aws:PrincipalIsAWSService"
+      values   = ["true"]
+    }
+
+    condition {
+      test     = "Null"
+      variable = "aws:SourceAccount"
+      values   = ["false"]
+    }
+
+    condition {
+      test     = "StringNotEquals"
+      variable = "aws:SourceAccount"
+      values = [
+        data.aws_caller_identity.current.account_id,
+      ]
+    }
+  }
+}
+
+resource "aws_secretsmanager_secret_policy" "chat_tools" {
+  count = length(aws_secretsmanager_secret.chat_tools)
+
+  secret_arn          = aws_secretsmanager_secret.chat_tools[count.index].arn
+  policy              = data.aws_iam_policy_document.secret_account_boundary.json
+  block_public_policy = true
+}
+
+resource "aws_secretsmanager_secret_policy" "mysql" {
+  count = length(aws_secretsmanager_secret.mysql)
+
+  secret_arn          = aws_secretsmanager_secret.mysql[count.index].arn
+  policy              = data.aws_iam_policy_document.secret_account_boundary.json
+  block_public_policy = true
+}
+
 # Main agent module
 module "agent" {
   source = "./modules/tracis_agentcore"

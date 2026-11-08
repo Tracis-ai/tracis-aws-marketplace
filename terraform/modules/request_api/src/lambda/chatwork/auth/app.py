@@ -29,11 +29,11 @@ if not ENQUEUE_FUNCTION_NAME:
 
 def lambda_handler(event, context):
     try:
-        headers = {k.lower(): v for k, v in (event.get("headers") or {}).items()}
-
-        raw_body = event.get("body", "")
-        if event.get("isBase64Encoded", False):
-            raw_body = base64.b64decode(raw_body).decode("utf-8")
+        try:
+            headers, raw_body = parse_request(event)
+        except (ValueError, TypeError, UnicodeError):
+            logger.warning("Invalid request envelope")
+            return bad_request()
 
         json_body = parse_json_body(headers, raw_body)
         if not json_body:
@@ -52,6 +52,17 @@ def lambda_handler(event, context):
         if auth_response["statusCode"] != HTTPStatus.OK:
             return auth_response
 
+        event_type = json_body.get("webhook_event_type")
+        if not isinstance(event_type, str) or not event_type:
+            return bad_request()
+        if event_type != "mention_to_me":
+            logger.info("Ignoring unsupported event type")
+            return {"statusCode": HTTPStatus.OK}
+
+        if not valid_event(json_body):
+            logger.warning("Invalid event")
+            return bad_request()
+
         lambda_client.invoke(
             FunctionName=ENQUEUE_FUNCTION_NAME,
             InvocationType="Event",
@@ -64,25 +75,84 @@ def lambda_handler(event, context):
         }
 
     except Exception as e:
-        logger.exception(f"Error handling request: {e}")
+        logger.error(
+            "Authentication processing failed", extra={"error_type": type(e).__name__}
+        )
         return {
             "statusCode": HTTPStatus.INTERNAL_SERVER_ERROR,
             "body": "An error occurred while processing authentication.",
         }
 
 
+def bad_request():
+    return {
+        "statusCode": HTTPStatus.BAD_REQUEST,
+        "body": "Invalid or unsupported request",
+    }
+
+
+def parse_request(event):
+    if not isinstance(event, dict):
+        raise ValueError("Invalid request envelope")
+
+    headers = event.get("headers")
+    if not isinstance(headers, dict) or any(
+        not isinstance(key, str) or not isinstance(value, str)
+        for key, value in headers.items()
+    ):
+        raise ValueError("Invalid request headers")
+
+    raw_body = event.get("body")
+    encoded = event.get("isBase64Encoded", False)
+    if not isinstance(raw_body, str) or not isinstance(encoded, bool):
+        raise ValueError("Invalid request body")
+    if encoded:
+        raw_body = base64.b64decode(raw_body, validate=True).decode("utf-8")
+    raw_body.encode("utf-8")
+
+    return {key.lower(): value for key, value in headers.items()}, raw_body
+
+
 def parse_json_body(headers: dict, body: str) -> dict:
-    if not body:
+    content_type = headers.get("content-type", "").split(";", 1)[0].strip().lower()
+    if not body or content_type != "application/json":
         return {}
 
-    content_type = headers.get("content-type", "")
-    if content_type.startswith("application/json"):
-        try:
-            return json.loads(body)
-        except json.JSONDecodeError:
-            return {}
+    try:
+        parsed = json.loads(body)
+    except (ValueError, RecursionError):
+        return {}
 
-    return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def valid_event(payload):
+    if payload.get("webhook_event_type") != "mention_to_me":
+        return False
+    if (
+        not isinstance(payload.get("webhook_setting_id"), str)
+        or not payload["webhook_setting_id"]
+    ):
+        return False
+
+    event = payload.get("webhook_event")
+    if not isinstance(event, dict):
+        return False
+    if not all(
+        type(event.get(key)) is int and event[key] > 0
+        for key in ("room_id", "from_account_id", "to_account_id", "send_time")
+    ):
+        return False
+    if (
+        not isinstance(event.get("message_id"), str)
+        or not event["message_id"].isascii()
+        or not event["message_id"].isdigit()
+    ):
+        return False
+
+    return isinstance(event.get("body"), str) and (
+        type(event.get("update_time")) is int and event["update_time"] >= 0
+    )
 
 
 def authorize_request(
@@ -98,19 +168,17 @@ def authorize_request(
             "body": "No Required Header",
         }
 
+    if not signature.isascii():
+        return bad_request()
+
     req_timestamp = json_body.get("webhook_event_time")
-    try:
-        timestamp = int(req_timestamp)
-    except (TypeError, ValueError):
-        logger.error("Invalid Chatwork webhook_event_time")
-        return {
-            "statusCode": HTTPStatus.BAD_REQUEST,
-            "body": "Invalid request timestamp",
-        }
+    if type(req_timestamp) is not int:
+        return bad_request()
+    timestamp = req_timestamp
 
     # Replay attack protection
     now = datetime.datetime.now().timestamp()
-    if abs(now - timestamp) > 60 * 5:
+    if not now - 60 * 5 <= timestamp <= now + 60 * 5:
         logger.error("Request timestamp is too old")
         return {
             "statusCode": HTTPStatus.UNAUTHORIZED,

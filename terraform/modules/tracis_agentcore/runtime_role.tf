@@ -19,13 +19,15 @@ module "agentcore_runtime_role" {
         {
           test     = "StringEquals"
           variable = "aws:SourceAccount"
-          values   = [data.aws_caller_identity.current.account_id]
+          values = [
+            data.aws_caller_identity.current.account_id,
+          ]
         },
         {
           test     = "ArnLike"
           variable = "aws:SourceArn"
           values = [
-            "arn:aws:bedrock-agentcore:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:*",
+            "arn:aws:bedrock-agentcore:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:runtime/*",
           ]
         },
       ]
@@ -49,9 +51,11 @@ module "agentcore_runtime_role" {
       resources = [local.image_repo_arn]
     }
     AgentCoreRuntimeLogGroupCreation = {
-      effect    = "Allow"
-      actions   = ["logs:CreateLogGroup"]
-      resources = ["arn:aws:logs:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:log-group:/aws/bedrock-agentcore/runtimes/*"]
+      effect  = "Allow"
+      actions = ["logs:CreateLogGroup"]
+      resources = [
+        "arn:aws:logs:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:log-group:/aws/bedrock-agentcore/runtimes/*",
+      ]
     }
     AgentCoreRuntimeLogging = {
       effect = "Allow"
@@ -82,7 +86,9 @@ module "agentcore_runtime_role" {
         "logs:DescribeLogStreams",
         "logs:PutLogEvents",
       ]
-      resources = ["${aws_cloudwatch_log_group.statistics.arn}:*"]
+      resources = [
+        "${aws_cloudwatch_log_group.statistics.arn}:*",
+      ]
     }
     AgentCoreRuntimeMetricsPublication = {
       effect    = "Allow"
@@ -124,9 +130,11 @@ module "agentcore_runtime_role" {
       ]
     }
     BedrockKnowledgeBaseRetrieval = {
-      effect    = "Allow"
-      actions   = ["bedrock:Retrieve"]
-      resources = [aws_bedrockagent_knowledge_base.this.arn]
+      effect  = "Allow"
+      actions = ["bedrock:Retrieve"]
+      resources = [
+        aws_bedrockagent_knowledge_base.this.arn,
+      ]
     }
     BedrockModelInvocation = {
       effect = "Allow"

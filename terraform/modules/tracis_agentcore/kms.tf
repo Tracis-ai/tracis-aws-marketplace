@@ -31,7 +31,9 @@ locals {
             {
               test     = "StringEquals"
               variable = "aws:SourceAccount"
-              values   = [data.aws_caller_identity.current.account_id]
+              values = [
+                data.aws_caller_identity.current.account_id,
+              ]
             },
             {
               test     = "ForAnyValue:StringEquals"
@@ -48,11 +50,73 @@ locals {
   }
 }
 
+data "aws_iam_policy_document" "kms_account_boundary" {
+  statement {
+    sid    = "DenyExternalPrincipals"
+    effect = "Deny"
+
+    actions   = ["kms:*"]
+    resources = ["*"]
+
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+
+    condition {
+      test     = "StringNotEquals"
+      variable = "aws:PrincipalAccount"
+      values = [
+        data.aws_caller_identity.current.account_id,
+      ]
+    }
+
+    condition {
+      test     = "BoolIfExists"
+      variable = "aws:PrincipalIsAWSService"
+      values   = ["false"]
+    }
+  }
+
+  statement {
+    sid    = "DenyExternalServiceSources"
+    effect = "Deny"
+
+    actions   = ["kms:*"]
+    resources = ["*"]
+
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+
+    condition {
+      test     = "Bool"
+      variable = "aws:PrincipalIsAWSService"
+      values   = ["true"]
+    }
+
+    condition {
+      test     = "Null"
+      variable = "aws:SourceAccount"
+      values   = ["false"]
+    }
+
+    condition {
+      test     = "StringNotEquals"
+      variable = "aws:SourceAccount"
+      values = [
+        data.aws_caller_identity.current.account_id,
+      ]
+    }
+  }
+}
+
 module "encryption_keys" {
+  for_each = local.kms_keys
+
   source  = "terraform-aws-modules/kms/aws"
   version = "4.2.0"
-
-  for_each = local.kms_keys
 
   description             = "CMK for encrypting ${each.key} used by ${var.prefix}-tracis-ai-agent"
   aliases_use_name_prefix = true
@@ -62,6 +126,9 @@ module "encryption_keys" {
 
   enable_default_policy = true
   key_statements        = each.value.key_statements
+  source_policy_documents = [
+    data.aws_iam_policy_document.kms_account_boundary.json,
+  ]
 
   deletion_window_in_days = 7
 }

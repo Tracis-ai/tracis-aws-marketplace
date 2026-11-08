@@ -16,13 +16,15 @@ module "gateway_role" {
         {
           test     = "StringEquals"
           variable = "aws:SourceAccount"
-          values   = [data.aws_caller_identity.current.account_id]
+          values = [
+            data.aws_caller_identity.current.account_id,
+          ]
         },
         {
           test     = "ArnLike"
           variable = "aws:SourceArn"
           values = [
-            "arn:aws:bedrock-agentcore:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:*",
+            "arn:aws:bedrock-agentcore:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:gateway/*",
           ]
         },
       ]

@@ -28,20 +28,159 @@ module "stats_logs_forwarder" {
   publish = true
 }
 
-resource "aws_lambda_permission" "stats_logs_forwarder" {
-  statement_id   = "AllowCloudWatchLogsInvocation"
-  action         = "lambda:InvokeFunction"
-  function_name  = module.stats_logs_forwarder.lambda_function_name
-  principal      = "logs.${data.aws_region.current.region}.amazonaws.com"
-  source_arn     = "${aws_cloudwatch_log_group.statistics.arn}:*"
-  source_account = data.aws_caller_identity.current.account_id
-}
-
 resource "aws_cloudwatch_log_group" "statistics" {
   name              = local.statistics_log_group_name
   retention_in_days = 1
 }
 
+data "aws_iam_policy_document" "stats_logs_forwarder_invocation" {
+  statement {
+    sid    = "AllowStatisticsLogDelivery"
+    effect = "Allow"
+
+    actions = ["lambda:InvokeFunction"]
+    resources = [
+      "${module.stats_logs_forwarder.lambda_function_arn}",
+      "${module.stats_logs_forwarder.lambda_function_arn}:*",
+    ]
+
+    principals {
+      type = "Service"
+      identifiers = [
+        "logs.amazonaws.com",
+        "logs.${data.aws_region.current.region}.amazonaws.com",
+      ]
+    }
+
+    condition {
+      test     = "ArnLike"
+      variable = "aws:SourceArn"
+      values = [
+        "${aws_cloudwatch_log_group.statistics.arn}:*",
+      ]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:SourceAccount"
+      values = [
+        "${data.aws_caller_identity.current.account_id}",
+      ]
+    }
+  }
+
+  statement {
+    sid    = "DenyUnexpectedServicePrincipal"
+    effect = "Deny"
+
+    actions = ["lambda:InvokeFunction"]
+    resources = [
+      "${module.stats_logs_forwarder.lambda_function_arn}",
+      "${module.stats_logs_forwarder.lambda_function_arn}:*",
+    ]
+
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+
+    condition {
+      test     = "ForAllValues:StringNotEquals"
+      variable = "aws:PrincipalServiceNamesList"
+      values = [
+        "logs.amazonaws.com",
+        "logs.${data.aws_region.current.region}.amazonaws.com",
+      ]
+    }
+
+    condition {
+      test     = "StringNotEquals"
+      variable = "aws:PrincipalServiceName"
+      values   = ["lambda.amazonaws.com"]
+    }
+  }
+
+  statement {
+    sid    = "DenyUnexpectedSourceArn"
+    effect = "Deny"
+
+    actions = ["lambda:InvokeFunction"]
+    resources = [
+      "${module.stats_logs_forwarder.lambda_function_arn}",
+      "${module.stats_logs_forwarder.lambda_function_arn}:*",
+    ]
+
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+
+    condition {
+      test     = "ArnNotLike"
+      variable = "aws:SourceArn"
+      values = [
+        "${aws_cloudwatch_log_group.statistics.arn}:*",
+      ]
+    }
+
+    condition {
+      test     = "StringNotEquals"
+      variable = "aws:PrincipalServiceName"
+      values   = ["lambda.amazonaws.com"]
+    }
+  }
+
+  statement {
+    sid    = "DenyUnexpectedSourceAccount"
+    effect = "Deny"
+
+    actions = ["lambda:InvokeFunction"]
+    resources = [
+      "${module.stats_logs_forwarder.lambda_function_arn}",
+      "${module.stats_logs_forwarder.lambda_function_arn}:*",
+    ]
+
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+
+    condition {
+      test     = "StringNotEquals"
+      variable = "aws:SourceAccount"
+      values = [
+        "${data.aws_caller_identity.current.account_id}",
+      ]
+    }
+
+    condition {
+      test     = "StringNotEquals"
+      variable = "aws:PrincipalServiceName"
+      values   = ["lambda.amazonaws.com"]
+    }
+  }
+
+  statement {
+    sid    = "DenyFunctionUrl"
+    effect = "Deny"
+
+    actions = ["lambda:InvokeFunctionUrl"]
+    resources = [
+      "${module.stats_logs_forwarder.lambda_function_arn}",
+      "${module.stats_logs_forwarder.lambda_function_arn}:*",
+    ]
+
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+  }
+}
+
+resource "aws_lambda_resource_policy" "stats_logs_forwarder_invocation" {
+  resource_arn = module.stats_logs_forwarder.lambda_function_arn
+  policy       = data.aws_iam_policy_document.stats_logs_forwarder_invocation.json
+}
 
 resource "aws_cloudwatch_log_subscription_filter" "statistics" {
   name            = "${var.prefix}-tracis-ai-statistics-logs"
@@ -49,5 +188,7 @@ resource "aws_cloudwatch_log_subscription_filter" "statistics" {
   filter_pattern  = "{ $.transfer_to = \"BTM\" }"
   destination_arn = module.stats_logs_forwarder.lambda_function_arn
 
-  depends_on = [aws_lambda_permission.stats_logs_forwarder]
+  depends_on = [
+    aws_lambda_resource_policy.stats_logs_forwarder_invocation,
+  ]
 }

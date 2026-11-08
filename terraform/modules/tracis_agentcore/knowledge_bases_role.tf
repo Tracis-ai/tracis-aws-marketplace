@@ -19,7 +19,16 @@ module "kb_role" {
         {
           test     = "StringEquals"
           variable = "aws:SourceAccount"
-          values   = [data.aws_caller_identity.current.account_id]
+          values = [
+            data.aws_caller_identity.current.account_id,
+          ]
+        },
+        {
+          test     = "ArnLike"
+          variable = "aws:SourceArn"
+          values = [
+            "arn:aws:bedrock:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:knowledge-base/*",
+          ]
         },
       ]
     }
@@ -36,9 +45,11 @@ module "kb_role" {
       resources = ["*"]
     }
     InvokeBedrockModel = {
-      effect    = "Allow"
-      actions   = ["bedrock:InvokeModel"]
-      resources = ["arn:aws:bedrock:${data.aws_region.current.region}::foundation-model/*"]
+      effect  = "Allow"
+      actions = ["bedrock:InvokeModel"]
+      resources = [
+        "arn:aws:bedrock:${data.aws_region.current.region}::foundation-model/*",
+      ]
     }
     ReadDataSources = {
       effect = "Allow"

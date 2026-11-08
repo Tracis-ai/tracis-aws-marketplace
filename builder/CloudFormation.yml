@@ -69,7 +69,7 @@ Parameters:
 Mappings:
   ReleaseConfig:
     Current:
-      SourceVersion: "v202610-a42f6a4b8310"
+      SourceVersion: "v202611-ef6f1d1fcec2"
 
 Conditions:
   SourceVersionNotSpecified: !Equals
@@ -97,6 +97,40 @@ Resources:
             NoncurrentVersionExpiration:
               NoncurrentDays: 60
 
+  TfStateBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref TfStateBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyExternalPrincipals
+            Effect: Deny
+            Principal: "*"
+            Action: s3:*
+            Resource:
+              - !GetAtt TfStateBucket.Arn
+              - !Sub "${TfStateBucket.Arn}/*"
+            Condition:
+              StringNotEquals:
+                "aws:PrincipalAccount": !Ref AWS::AccountId
+              BoolIfExists:
+                "aws:PrincipalIsAWSService": "false"
+          - Sid: DenyExternalServiceSources
+            Effect: Deny
+            Principal: "*"
+            Action: s3:*
+            Resource:
+              - !GetAtt TfStateBucket.Arn
+              - !Sub "${TfStateBucket.Arn}/*"
+            Condition:
+              Bool:
+                "aws:PrincipalIsAWSService": "true"
+              "Null":
+                "aws:SourceAccount": "false"
+              StringNotEquals:
+                "aws:SourceAccount": !Ref AWS::AccountId
+
   TfLogGroup:
     Type: AWS::Logs::LogGroup
     DeletionPolicy: Delete
@@ -111,6 +145,29 @@ Resources:
       RepositoryName: !Sub "${Prefix}-tracis-ai-agent-image-repo"
       EmptyOnDelete: true
       ImageTagMutability: IMMUTABLE
+      RepositoryPolicyText:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyExternalPrincipals
+            Effect: Deny
+            Principal: "*"
+            Action: ecr:*
+            Condition:
+              StringNotEquals:
+                "aws:PrincipalAccount": !Ref AWS::AccountId
+              BoolIfExists:
+                "aws:PrincipalIsAWSService": "false"
+          - Sid: DenyExternalServiceSources
+            Effect: Deny
+            Principal: "*"
+            Action: ecr:*
+            Condition:
+              Bool:
+                "aws:PrincipalIsAWSService": "true"
+              "Null":
+                "aws:SourceAccount": "false"
+              StringNotEquals:
+                "aws:SourceAccount": !Ref AWS::AccountId
 
   MySqlToolsImageMirrorRepository:
     Type: AWS::ECR::Repository
@@ -131,6 +188,26 @@ Resources:
             Condition:
               ArnLike:
                 "aws:SourceArn": !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${Prefix}-tracis-ai-mysql-tool-function"
+          - Sid: DenyExternalPrincipals
+            Effect: Deny
+            Principal: "*"
+            Action: ecr:*
+            Condition:
+              StringNotEquals:
+                "aws:PrincipalAccount": !Ref AWS::AccountId
+              BoolIfExists:
+                "aws:PrincipalIsAWSService": "false"
+          - Sid: DenyExternalServiceSources
+            Effect: Deny
+            Principal: "*"
+            Action: ecr:*
+            Condition:
+              Bool:
+                "aws:PrincipalIsAWSService": "true"
+              "Null":
+                "aws:SourceAccount": "false"
+              StringNotEquals:
+                "aws:SourceAccount": !Ref AWS::AccountId
 
   CodeBuildServiceRole:
     Type: AWS::IAM::Role

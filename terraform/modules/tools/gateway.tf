@@ -32,5 +32,8 @@ resource "aws_bedrockagentcore_gateway_target" "this" {
     }
   }
 
-  depends_on = [module.tool_schema_objects]
+  depends_on = [
+    module.tool_schema_objects,
+    aws_lambda_resource_policy.tool_access_boundary,
+  ]
 }
