@@ -12,6 +12,7 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 SLACK_POST_MESSAGE_URL = "https://slack.com/api/chat.postMessage"
+SLACK_POST_EPHEMERAL_URL = "https://slack.com/api/chat.postEphemeral"
 CHAT_TOOLS_SECRET_ARN = os.environ.get("CHAT_TOOLS_SECRET_ARN")
 MAX_SLACK_MESSAGE_LENGTH = 3000
 SLACK_API_MAX_RETRY_COUNT = 3
@@ -19,17 +20,29 @@ SLACK_API_MAX_RETRY_COUNT = 3
 
 def dispatch_response(message: dict) -> None:
     response = message.get("response")
-    user_prompt = message.get("user_prompt")
     if not response:
         raise ValueError("response is missing")
+
+    user_prompt = message.get("user_prompt")
     if not user_prompt:
         raise ValueError("user_prompt is missing")
 
     metadata = message.get("metadata") or {}
+    user = metadata.get("user")
     channel = metadata.get("channel")
     thread_ts = metadata.get("thread_ts")
-    if not channel or not thread_ts:
-        raise ValueError("channel or thread_ts is missing for Slack response")
+    if not channel:
+        raise ValueError("channel is missing for Slack response")
+
+    delivery = message.get("delivery") or {}
+    reply_in_thread = delivery.get("reply_in_thread", True)
+    is_ephemeral = delivery.get("ephemeral", False)
+    if is_ephemeral:
+        if not user:
+            raise ValueError("user is missing for ephemeral response")
+
+    if reply_in_thread and not thread_ts:
+        raise ValueError("thread_ts is missing for Slack response")
 
     slack_bot_token = get_slack_bot_token()
     for message_part in build_slack_messages(
@@ -40,6 +53,9 @@ def dispatch_response(message: dict) -> None:
             channel=channel,
             thread_ts=thread_ts,
             token=slack_bot_token,
+            reply_in_thread=reply_in_thread,
+            is_ephemeral=is_ephemeral,
+            user=user if is_ephemeral else None,
         )
     logger.info("Slack API response dispatched successfully")
 
@@ -82,13 +98,17 @@ def build_slack_messages(
 def send_with_slack_api(
     message: str,
     channel: str,
-    thread_ts: str,
+    thread_ts: str | None,
     token: str,
+    reply_in_thread: bool = True,
+    is_ephemeral: bool = False,
+    user: str | None = None,
 ) -> None:
     payload = {
         "channel": channel,
-        "thread_ts": thread_ts,
         "text": message,
+        **({"thread_ts": thread_ts} if reply_in_thread else {}),
+        **({"user": user} if user else {}),
     }
     headers = {
         "Authorization": f"Bearer {token}",
@@ -96,7 +116,7 @@ def send_with_slack_api(
     }
 
     request = urllib.request.Request(
-        SLACK_POST_MESSAGE_URL,
+        SLACK_POST_EPHEMERAL_URL if is_ephemeral else SLACK_POST_MESSAGE_URL,
         data=json.dumps(payload).encode("utf-8"),
         headers=headers,
         method="POST",

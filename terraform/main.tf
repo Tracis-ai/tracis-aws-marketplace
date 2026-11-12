@@ -180,4 +180,38 @@ module "request_api" {
     enabled = false
   }
   chat_tools_secret_arn = local.effective_chat_tools_secret_arn
+  setup_config = {
+    enabled        = var.enable_setup_app
+    invocation_url = try(module.setup_app[0].setup_links_api.invocation_url, null)
+  }
+}
+
+module "setup_app" {
+  count = var.enable_setup_app ? 1 : 0
+
+  source = "./modules/setup_app"
+
+  prefix                     = var.prefix
+  setup_api_image_url        = local.effective_agent_image_url
+  chat_tools_secret_arn      = local.effective_chat_tools_secret_arn
+  invoker_function_role_name = module.request_api.invoker_function_role.name
+  lambda_subnet_ids          = local.subnet_ids
+  mysql_connection = {
+    enabled = local.enable_mysql_connection
+    host    = var.mysql_endpoint
+    port    = var.mysql_port
+    db_name = var.mysql_db_name
+    secret_arn = coalesce(
+      local.mysql_secret_arn,
+      try(aws_secretsmanager_secret.mysql[0].arn, null),
+    )
+  }
+  schema_reader_image_urls = {
+    mysql = local.enable_mysql_connection ? trimspace(var.mysql_tools_image_url) : null
+  }
+  enabled_tools = module.tools.enabled_tools
+  tool_sg_ids = {
+    for key, function in module.tools.tool_functions : key => function.security_group_id
+  }
+  knowledge_bases = module.agent.knowledge_bases
 }

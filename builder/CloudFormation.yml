@@ -10,6 +10,13 @@ Parameters:
     Type: String
     Default: ""
     Description: "MySQL Tools ECR image URL in the deployment Region. Required when MySQL is enabled until the standard image is published and its default tag is configured."
+  EnableSetupApp:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: "Deploy the TracisAI Setup API and Web UI. URLs are reported in the deploy build Terraform outputs."
   ToolsSubnetIds:
     Type: List<AWS::EC2::Subnet::Id>
     Description: "Subnet IDs for Tool Lambda VPC connectivity."
@@ -69,7 +76,7 @@ Parameters:
 Mappings:
   ReleaseConfig:
     Current:
-      SourceVersion: "v202611-ef6f1d1fcec2"
+      SourceVersion: "v202611-afc437122f58"
 
 Conditions:
   SourceVersionNotSpecified: !Equals
@@ -148,6 +155,16 @@ Resources:
       RepositoryPolicyText:
         Version: "2012-10-17"
         Statement:
+          - Sid: LambdaImageRetrieval
+            Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - ecr:BatchGetImage
+              - ecr:GetDownloadUrlForLayer
+            Condition:
+              ArnLike:
+                "aws:SourceArn": !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${Prefix}-tracis-ai-setup-api-function"
           - Sid: DenyExternalPrincipals
             Effect: Deny
             Principal: "*"
@@ -187,7 +204,9 @@ Resources:
               - ecr:GetDownloadUrlForLayer
             Condition:
               ArnLike:
-                "aws:SourceArn": !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${Prefix}-tracis-ai-mysql-tool-function"
+                "aws:SourceArn":
+                  - !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${Prefix}-tracis-ai-mysql-tool-function"
+                  - !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${Prefix}-tracisai-mysql-schema-reader"
           - Sid: DenyExternalPrincipals
             Effect: Deny
             Principal: "*"
@@ -267,12 +286,14 @@ Resources:
                 Resource:
                   - "arn:aws:ecr:us-east-1:709825985650:repository/btm/tracisai-free"
                   - "arn:aws:ecr:us-east-1:709825985650:repository/btm/tracisai-mysql-tools"
-              - Sid: PullMySqlToolsMirrorImage
+              - Sid: PullLambdaMirrorImages
                 Effect: Allow
                 Action:
                   - ecr:BatchGetImage
                   - ecr:GetDownloadUrlForLayer
-                Resource: !GetAtt MySqlToolsImageMirrorRepository.Arn
+                Resource:
+                  - !GetAtt AgentImageMirrorRepository.Arn
+                  - !GetAtt MySqlToolsImageMirrorRepository.Arn
               - Sid: PushMirrorImage
                 Effect: Allow
                 Action:
@@ -501,8 +522,68 @@ Resources:
                   - !Sub "arn:${AWS::Partition}:cloudformation:${AWS::Region}:aws:transform/*"
                   - !Sub "arn:${AWS::Partition}:serverlessrepo:*:*:applications/*"
 
+  SetupResourcePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Terraform permissions for TracisAI Setup resources
+      Roles:
+        - !Ref CodeBuildServiceRole
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: SetupDynamoDBAccess
+            Effect: Allow
+            Action:
+              - dynamodb:CreateTable
+              - dynamodb:DeleteTable
+              - dynamodb:DescribeTable
+              - dynamodb:UpdateTable
+              - dynamodb:DescribeContinuousBackups
+              - dynamodb:DescribeTimeToLive
+              - dynamodb:UpdateTimeToLive
+              - dynamodb:ListTagsOfResource
+              - dynamodb:TagResource
+              - dynamodb:UntagResource
+              - dynamodb:GetResourcePolicy
+              - dynamodb:PutResourcePolicy
+              - dynamodb:DeleteResourcePolicy
+            Resource:
+              - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${Prefix}-tracis-ai-setup-sessions"
+              - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${Prefix}-tracis-ai-contexts"
+          - Sid: SetupCloudFrontAccess
+            Effect: Allow
+            Action:
+              - cloudfront:CreateDistribution
+              - cloudfront:GetDistribution
+              - cloudfront:GetDistributionConfig
+              - cloudfront:UpdateDistribution
+              - cloudfront:DeleteDistribution
+              - cloudfront:ListTagsForResource
+              - cloudfront:TagResource
+              - cloudfront:UntagResource
+              - cloudfront:CreateOriginAccessControl
+              - cloudfront:GetOriginAccessControl
+              - cloudfront:UpdateOriginAccessControl
+              - cloudfront:DeleteOriginAccessControl
+              - cloudfront:CreateResponseHeadersPolicy
+              - cloudfront:GetResponseHeadersPolicy
+              - cloudfront:UpdateResponseHeadersPolicy
+              - cloudfront:DeleteResponseHeadersPolicy
+              - cloudfront:CreateFunction
+              - cloudfront:DescribeFunction
+              - cloudfront:GetFunction
+              - cloudfront:UpdateFunction
+              - cloudfront:PublishFunction
+              - cloudfront:DeleteFunction
+              - cloudfront:GetCachePolicy
+              - cloudfront:ListCachePolicies
+              - cloudfront:GetOriginRequestPolicy
+              - cloudfront:ListOriginRequestPolicies
+            Resource: "*"
+
   CodeBuildDeployAgent:
     Type: AWS::CodeBuild::Project
+    DependsOn: SetupResourcePolicy
     Properties:
       Name: !Sub "${Prefix}-tracis-deploy-agent"
       ConcurrentBuildLimit: 1
@@ -520,6 +601,8 @@ Resources:
             Value: !GetAtt AgentImageMirrorRepository.RepositoryUri
           - Name: AGENT_IMAGE_URL
             Value: !Ref AgentImageUrl
+          - Name: ENABLE_SETUP_APP
+            Value: !Ref EnableSetupApp
           - Name: BEDROCK_MODEL_ID
             Value: !Ref BedrockModelId
           - Name: CHAT_TOOLS_SECRET_ARN
@@ -574,6 +657,7 @@ Resources:
 
   CodeBuildDeleteAgent:
     Type: AWS::CodeBuild::Project
+    DependsOn: SetupResourcePolicy
     Properties:
       Name: !Sub "${Prefix}-tracis-delete-agent"
       ConcurrentBuildLimit: 1
@@ -589,6 +673,8 @@ Resources:
         EnvironmentVariables:
           - Name: AGENT_IMAGE_URL
             Value: !Ref AgentImageUrl
+          - Name: ENABLE_SETUP_APP
+            Value: !Ref EnableSetupApp
           - Name: BEDROCK_MODEL_ID
             Value: !Ref BedrockModelId
           - Name: CHAT_TOOLS_SECRET_ARN

@@ -53,6 +53,7 @@ phases:
         AGENTCORE_RUNTIME_SG_ADDRESS="module.agent.aws_security_group.agentcore_runtime"
         TF_VAR_ARGS=(
           -var="prefix=${PREFIX}" \
+          -var="enable_setup_app=${ENABLE_SETUP_APP:-false}" \
           -var="subnet_ids=${TOOLS_SUBNET_IDS}" \
           -var="enabled_db_types=${ENABLED_DB_TYPES}" \
           -var="mysql_endpoint=${MYSQL_ENDPOINT}" \
@@ -75,6 +76,28 @@ phases:
         terraform "${TF_ACTION}" -no-color -auto-approve "${TF_VAR_ARGS[@]}" 2>&1 | tee "${TF_EXEC_LOG}"
         TF_EXEC_EXIT_CODE=${PIPESTATUS[0]}
         set -e
+
+        # AgentCore can validate the new ECR URI before an updated IAM policy has propagated.
+        # Retry only this single apply error; unrelated errors and destroy must fail normally.
+        IAM_PROPAGATION_RETRY_DELAY=15
+        for IAM_PROPAGATION_RETRY in 1 2 3; do
+          if [ "${TF_EXEC_EXIT_CODE}" -eq 0 ] \
+            || [ "${TF_ACTION}" != "apply" ] \
+            || [ "$(grep -c '^Error:' "${TF_EXEC_LOG}")" -ne 1 ] \
+            || ! grep -Eq '^Error: (creating|updating) Bedrock AgentCore Agent Runtime$' "${TF_EXEC_LOG}" \
+            || ! grep -Fxq '  with module.agent.aws_bedrockagentcore_agent_runtime.this,' "${TF_EXEC_LOG}" \
+            || ! grep -Fq 'ValidationException: Access denied while validating ECR URI' "${TF_EXEC_LOG}"; then
+            break
+          fi
+
+          echo "Waiting ${IAM_PROPAGATION_RETRY_DELAY}s for AgentCore ECR permissions to propagate (retry ${IAM_PROPAGATION_RETRY}/3)..."
+          sleep "${IAM_PROPAGATION_RETRY_DELAY}"
+          set +e
+          terraform "${TF_ACTION}" -no-color -auto-approve "${TF_VAR_ARGS[@]}" 2>&1 | tee "${TF_EXEC_LOG}"
+          TF_EXEC_EXIT_CODE=${PIPESTATUS[0]}
+          set -e
+          IAM_PROPAGATION_RETRY_DELAY=$((IAM_PROPAGATION_RETRY_DELAY * 2))
+        done
 
         if [ "${TF_EXEC_EXIT_CODE}" -ne 0 ]; then
           RETAINED_RUNTIME_SG_ID=$(awk -v address="${AGENTCORE_RUNTIME_SG_ADDRESS}" '

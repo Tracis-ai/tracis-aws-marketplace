@@ -27,10 +27,12 @@ output "knowledge_bases" {
   description = "Knowledge Base and data source identifiers"
   value = {
     id             = aws_bedrockagent_knowledge_base.this.id
+    arn            = aws_bedrockagent_knowledge_base.this.arn
     data_source_id = aws_bedrockagent_data_source.this.data_source_id
     data_source_bucket = {
-      arn  = module.kb_source_bucket.s3_bucket_arn
-      name = module.kb_source_bucket.s3_bucket_id
+      arn                = module.kb_source_bucket.s3_bucket_arn
+      name               = module.kb_source_bucket.s3_bucket_id
+      encryption_key_arn = module.encryption_keys["kb-data-src"].key_arn
     }
   }
 }

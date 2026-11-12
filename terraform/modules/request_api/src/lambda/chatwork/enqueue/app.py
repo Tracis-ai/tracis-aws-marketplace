@@ -52,6 +52,8 @@ def lambda_handler(event, _):
     room_id = chatwork_event.get("room_id")
     message_id = chatwork_event.get("message_id")
     from_account_id = chatwork_event.get("from_account_id")
+    send_time = chatwork_event.get("send_time")
+
     if not (room_id and message_id and from_account_id):
         logger.error(
             "Missing required fields in event payload (room_id, message_id, from_account_id): %s",
@@ -59,23 +61,22 @@ def lambda_handler(event, _):
         )
         return
 
+    text = chatwork_event.get("body", "")
+    prompt = extract_prompt(text)
+
+    queue_message = {
+        "prompt": prompt,
+        "metadata": {
+            "platform": PLATFORM,
+            "room_id": room_id,
+            "message_id": message_id,
+            "from_account_id": from_account_id,
+            "send_time": send_time,
+        },
+    }
+    dedup_id = f"{PLATFORM}:{room_id}:{message_id}"
+
     try:
-        send_time = chatwork_event.get("send_time")
-        text = chatwork_event.get("body", "")
-        prompt = extract_prompt(text)
-
-        queue_message = {
-            "prompt": prompt,
-            "metadata": {
-                "platform": PLATFORM,
-                "room_id": room_id,
-                "message_id": message_id,
-                "from_account_id": from_account_id,
-                "send_time": send_time,
-            },
-        }
-        dedup_id = f"{PLATFORM}:{room_id}:{message_id}"
-
         sqs.send_message(
             QueueUrl=SQS_QUEUE_URL,
             MessageBody=json.dumps(queue_message),

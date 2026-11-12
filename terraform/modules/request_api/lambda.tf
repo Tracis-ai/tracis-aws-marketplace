@@ -84,9 +84,10 @@ module "lambda" {
       "CHAT_TOOLS_SECRET_ARN" = var.chat_tools_secret_arn
     } : {},
     each.value.type == "invoker" ? {
-      "AGENT_INVOCATION_TIMEOUT_SECONDS" = tostring(each.value.timeout - 10)
-      "AGENT_INVOCATION_URL"             = var.agent_invocation_url
-      "RESPONSE_QUEUE_URL"               = module.sqs["response"].queue_url
+      "AGENT_INVOCATION_URL"       = var.agent_invocation_url
+      "SETUP_LINKS_INVOCATION_URL" = var.setup_config.enabled ? trimspace(var.setup_config.invocation_url) : ""
+      "INVOCATION_TIMEOUT_SECONDS" = tostring(each.value.timeout - 10)
+      "RESPONSE_QUEUE_URL"         = module.sqs["response"].queue_url
     } : {},
     each.value.type == "dispatcher" ? {
       "CHAT_TOOLS_SECRET_ARN" = var.chat_tools_secret_arn

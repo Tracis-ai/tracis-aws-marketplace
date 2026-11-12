@@ -18,20 +18,20 @@
 
 ### エージェント実行基盤（AgentCore Runtime）
 
-| 種別                 | リソース名（例）                            | 用途                                                                                                                       |
-| :------------------- | :------------------------------------------ | :------------------------------------------------------------------------------------------------------------------------- |
-| AgentCore Runtime    | `[prefix]_tracis_ai_agent`                  | TracisAI Agent を実行する AgentCore Runtime。Prefix 内のハイフンはアンダースコアに置換され、Runtime 名は最大 48 文字です。 |
-| IAM ロール           | `[prefix]-tracis-ai-agentcore-runtime-role` | AgentCore Runtime が ECR、Bedrock、Secrets Manager などへアクセスする実行ロール                                            |
-| Bedrock Guardrail    | `[prefix]-tracis-ai-guardrail`              | エージェントの入出力に対する Guardrail                                                                                     |
+| 種別              | リソース名（例）                            | 用途                                                                                                                       |
+| :---------------- | :------------------------------------------ | :------------------------------------------------------------------------------------------------------------------------- |
+| AgentCore Runtime | `[prefix]_tracis_ai_agent`                  | TracisAI Agent を実行する AgentCore Runtime。Prefix 内のハイフンはアンダースコアに置換され、Runtime 名は最大 48 文字です。 |
+| IAM ロール        | `[prefix]-tracis-ai-agentcore-runtime-role` | AgentCore Runtime が ECR、Bedrock、Secrets Manager などへアクセスする実行ロール                                            |
+| Bedrock Guardrail | `[prefix]-tracis-ai-guardrail`              | エージェントの入出力に対する Guardrail                                                                                     |
 
 ### MySQL Tool（MySQL を有効にした場合）
 
-| 種別 | リソース名（例） | 用途 |
-| :--- | :--- | :--- |
-| AgentCore Gateway | `[prefix]-tracis-ai-tools-gateway` | Runtime から SigV4 / IAM 認証で MySQL Tool を呼び出す入口 |
-| Lambda | `[prefix]-tracis-ai-mysql-tool-function` | VPC 内で MySQL に接続し、SQL Guard を適用してクエリを実行 |
-| セキュリティグループ | `[prefix]-tracis-ai-mysql-tool-function-sg` | MySQL Tool Lambda の DB・AWS API 接続用 |
-| IAM ロール | `[prefix]-tracis-ai-mysql-tool-function-role` | MySQL Secret の読み取りと VPC 接続用 |
+| 種別                 | リソース名（例）                              | 用途                                                      |
+| :------------------- | :-------------------------------------------- | :-------------------------------------------------------- |
+| AgentCore Gateway    | `[prefix]-tracis-ai-tools-gateway`            | Runtime から SigV4 / IAM 認証で MySQL Tool を呼び出す入口 |
+| Lambda               | `[prefix]-tracis-ai-mysql-tool-function`      | VPC 内で MySQL に接続し、SQL Guard を適用してクエリを実行 |
+| セキュリティグループ | `[prefix]-tracis-ai-mysql-tool-function-sg`   | MySQL Tool Lambda の DB・AWS API 接続用                   |
+| IAM ロール           | `[prefix]-tracis-ai-mysql-tool-function-role` | MySQL Secret の読み取りと VPC 接続用                      |
 
 Runtime は PUBLIC mode で動作します。DB 接続と MySQL Secret の読み取りは Tool Lambda が担当し、指定した DB セキュリティグループに Tool Lambda からの接続ルールを追加します。
 
@@ -96,15 +96,18 @@ CodeBuild の `terraform apply` 完了時に出力される `Outputs` セクシ�
 4. [ビルドログ] タブを開き、ログ末尾付近の `Outputs:` セクションを確認する
 5. 下記の値を控える（または `Apply complete!` 直後の出力をテキストとして保存しておく）
 
-### 控えておくべき主要な出力値
+### 控えておくべき出力値
 
-| Output 名                                | 値の例                                                                                                                                     | 利用先（次手順）                                                                                                                    |
-| :--------------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------- |
-| `request_api_urls["slack"]`              | `https://xxxxxxxxxx.execute-api.ap-northeast-1.amazonaws.com/slack`                                                                        | [Slack App の作成](/docs/create_environment/03_1_create_slack_app/README.md) の Event Subscriptions の Request URL に設定           |
-| `request_api_urls["chatwork"]`           | `https://xxxxxxxxxx.execute-api.ap-northeast-1.amazonaws.com/chatwork`                                                                     | [Chatwork Webhook の設定](/docs/create_environment/03_2_create_chatwork_webhook/README.md) の Webhook URL に設定                    |
-| `chat_tools_secret_name`                 | `[prefix]-tracis-chat-tools-credentials-XXXXXXXX`<br>※ `ChatToolsSecretArn` を未指定で作成した場合のみ値が出力される                       | [Secret の準備](/docs/create_environment/04_prepare_secret/README.md) でチャットツール認証情報を格納する共有 Secret 名              |
-| `mysql_secret_name`                      | `[prefix]-tracis-mysql-credentials-XXXXXXXX`<br>※ `MySqlSecretArn` を未指定かつ `EnabledDbTypes` に `mysql` を含める場合のみ値が出力される | [Secret の準備](/docs/create_environment/04_prepare_secret/README.md) で値を格納する DB Secret 名                                   |
-| `knowledge_base_data_source_bucket_name` | `[prefix]-tracis-ai-kb-data-src-[アカウントID]`                                                                                            | [ナレッジベースの準備](/docs/create_environment/05_prepare_knowledgebases/README.md) でドキュメントをアップロードする S3 バケット名 |
+| Output 名                                | 値の例                                                                                                                                     | 利用先（次手順）                                                                                                                                         |
+| :--------------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `request_api_urls["slack"]`              | `https://xxxxxxxxxx.execute-api.ap-northeast-1.amazonaws.com/slack`                                                                        | [Slack App の作成](/docs/create_environment/03_1_create_slack_app/README.md) の Event Subscriptions の Request URL に設定                                |
+| `request_api_urls["chatwork"]`           | `https://xxxxxxxxxx.execute-api.ap-northeast-1.amazonaws.com/chatwork`                                                                     | [Chatwork Webhook の設定](/docs/create_environment/03_2_create_chatwork_webhook/README.md) の Webhook URL に設定                                         |
+| `chat_tools_secret_name`                 | `[prefix]-tracis-chat-tools-credentials-XXXXXXXX`<br>※ `ChatToolsSecretArn` を未指定で作成した場合のみ値が出力される                       | [Secret の準備](/docs/create_environment/04_prepare_secret/README.md) でチャットツール認証情報を格納する共有 Secret 名                                   |
+| `mysql_secret_name`                      | `[prefix]-tracis-mysql-credentials-XXXXXXXX`<br>※ `MySqlSecretArn` を未指定かつ `EnabledDbTypes` に `mysql` を含める場合のみ値が出力される | [Secret の準備](/docs/create_environment/04_prepare_secret/README.md) で値を格納する DB Secret 名                                                        |
+| `knowledge_base_data_source_bucket_name` | `[prefix]-tracis-ai-kb-data-src-[アカウントID]`                                                                                            | [ナレッジベースの準備](/docs/create_environment/05_prepare_knowledgebases/README.md) でドキュメントをアップロードする S3 バケット名                      |
+| `setup_app_web_url`                      | `https://xxxxxxxxxx.cloudfront.net`                                                                                                        | [ナレッジベースの準備](/docs/create_environment/05_prepare_knowledgebases/README.md) で使用する Setup アプリの URL<br>※ `EnableSetupApp=true` の場合のみ |
+| `setup_app_oidc_redirect_urls["slack"]`  | `https://xxxxxxxxxx.cloudfront.net/api/oidc/slack/callback`                                                                                | [Slack App の作成](/docs/create_environment/03_1_create_slack_app/README.md) の Setup アプリ用 Redirect URL に設定<br>※ `EnableSetupApp=true` の場合のみ |
+
 
 > AgentCore Runtime の作成状況は AWS コンソールの「Amazon Bedrock AgentCore」の [Runtimes] で確認できます。Runtime 名は Prefix 内のハイフンをアンダースコアに置換した `[prefix]_tracis_ai_agent` です（最大 48 文字）。
 

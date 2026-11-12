@@ -63,3 +63,20 @@ variable "vpc_config" {
     error_message = "vpc_config.agent_sg_id, vpc_config.agent_api_port, and vpc_config.subnet_ids must be valid when vpc_config.enabled is true."
   }
 }
+
+variable "setup_config" {
+  description = "Configuration for invoking the Setup Links API"
+  type = object({
+    enabled        = bool
+    invocation_url = optional(string, "")
+  })
+  nullable = false
+
+  validation {
+    condition = (
+      !var.setup_config.enabled
+      || trimspace(var.setup_config.invocation_url) != ""
+    )
+    error_message = "setup_config.invocation_url must not be empty when setup_config.enabled is true."
+  }
+}

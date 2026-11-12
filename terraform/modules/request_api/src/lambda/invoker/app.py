@@ -16,9 +16,8 @@ logger.setLevel(logging.INFO)
 sqs = boto3.client("sqs")
 
 AGENT_INVOCATION_URL = os.environ.get("AGENT_INVOCATION_URL")
-AGENT_INVOCATION_TIMEOUT_SECONDS = int(
-    os.environ.get("AGENT_INVOCATION_TIMEOUT_SECONDS", "295")
-)
+SETUP_LINKS_INVOCATION_URL = os.environ.get("SETUP_LINKS_INVOCATION_URL")
+INVOCATION_TIMEOUT_SECONDS = int(os.environ.get("INVOCATION_TIMEOUT_SECONDS", "295"))
 RESPONSE_QUEUE_URL = os.environ.get("RESPONSE_QUEUE_URL")
 
 if not AGENT_INVOCATION_URL:
@@ -50,33 +49,43 @@ def lambda_handler(event, _):
             )
             continue
 
-        logger.info("Invoking Agent API: message_id=%s", request_message_id)
-        try:
-            response_data = invoke_agent(request_context)
-        except Exception as e:
-            logger.exception("Failed to invoke Agent API: %s", e)
-            response_data = {"response": "リクエストが失敗しました。"}
+        is_setup = is_setup_request(request_context["prompt"])
+        if is_setup and bool(SETUP_LINKS_INVOCATION_URL):
+            backend_type = "Setup"
+        else:
+            backend_type = "Agent"
 
-        if response_data is None:
+        logger.info("Invoking %s API: message_id=%s", backend_type, request_message_id)
+        try:
+            backend_response = invoke_backend(request_context, backend_type)
+        except Exception as e:
+            logger.exception("Failed to invoke %s API: %s", backend_type, e)
+            backend_response = {"response": "リクエストが失敗しました。"}
+
+        if backend_response is None:
             batch_item_failures.append(
                 {"itemIdentifier": request_message_id},
             )
             continue
 
-        queue_message = {
-            **response_data,
-            **request_context,
+        response_context = {
+            "user_prompt": request_context["prompt"],
+            "metadata": request_context["metadata"],
+            **backend_response,
         }
+
         try:
             queue_response(
-                queue_message,
+                response_context,
                 request_message_id,
                 message_group_id,
             )
-            logger.info("Agent response queued: message_id=%s", request_message_id)
+            logger.info(
+                "%s response queued: message_id=%s", backend_type, request_message_id
+            )
 
         except Exception as e:
-            logger.exception("Failed to queue Agent response: %s", e)
+            logger.exception("Failed to queue %s response: %s", backend_type, e)
             batch_item_failures.append(
                 {"itemIdentifier": request_message_id},
             )
@@ -106,34 +115,77 @@ def parse_request_body(request_body: str) -> dict | None:
         return None
 
     return {
-        "user_prompt": prompt,
+        "prompt": prompt,
         "metadata": metadata,
     }
 
 
-def invoke_agent(request_context: dict) -> dict | None:
-    payload = {
-        "prompt": request_context["user_prompt"],
+def is_setup_request(user_prompt: str) -> bool:
+    prompt = user_prompt.strip().casefold()
+    normalized_prompt = "".join(
+        chr(ord(char) + 0x60) if "ぁ" <= char <= "ゖ" else char for char in prompt
+    )
+    return normalized_prompt in {
+        "setup",
+        "セットアップ",
     }
+
+
+def build_backend_request(
+    backend_type: str, request_context: dict
+) -> tuple[str, str, dict]:
+    if backend_type == "Agent":
+        return (
+            AGENT_INVOCATION_URL,
+            "bedrock-agentcore",
+            {
+                "prompt": request_context["prompt"],
+            },
+        )
+
+    if backend_type == "Setup":
+        return (
+            SETUP_LINKS_INVOCATION_URL,
+            "execute-api",
+            {
+                "prompt": request_context["prompt"],
+                "metadata": request_context["metadata"],
+            },
+        )
+
+    raise ValueError(f"Unknown backend_type: {backend_type}")
+
+
+def invoke_backend(
+    request_context: dict,
+    backend_type: str,
+) -> dict | None:
+    (
+        url,
+        aws_service,
+        payload,
+    ) = build_backend_request(backend_type, request_context)
     request_body = json.dumps(payload).encode("utf-8")
 
     signed_request = AWSRequest(
         method="POST",
-        url=AGENT_INVOCATION_URL,
+        url=url,
         data=request_body,
         headers={"Content-Type": "application/json"},
     )
     credentials = boto3.Session().get_credentials()
     if credentials is None:
-        raise RuntimeError("AWS credentials are not available for Agent invocation")
+        raise RuntimeError(
+            f"AWS credentials are not available for {backend_type} API invocation"
+        )
 
     region = os.environ.get("AWS_REGION")
     if not region:
-        raise RuntimeError("AWS_REGION is not set for Agent invocation")
+        raise RuntimeError(f"AWS_REGION is not set for {backend_type} API invocation")
 
     SigV4Auth(
         credentials.get_frozen_credentials(),
-        "bedrock-agentcore",
+        aws_service,
         region,
     ).add_auth(signed_request)
     prepared_request = signed_request.prepare()
@@ -147,7 +199,7 @@ def invoke_agent(request_context: dict) -> dict | None:
     try:
         with urllib.request.urlopen(
             request,
-            timeout=AGENT_INVOCATION_TIMEOUT_SECONDS,
+            timeout=INVOCATION_TIMEOUT_SECONDS,
         ) as response:
             response_body = response.read().decode("utf-8")
     except urllib.error.HTTPError as e:
@@ -160,7 +212,8 @@ def invoke_agent(request_context: dict) -> dict | None:
             HTTPStatus.GATEWAY_TIMEOUT,
         )
         retryable_conflict = (
-            e.code == HTTPStatus.CONFLICT
+            aws_service == "bedrock-agentcore"
+            and e.code == HTTPStatus.CONFLICT
             and e.headers.get("x-amzn-ErrorType", "").split(":", 1)[0]
             == "RetryableConflictException"
         )
@@ -169,7 +222,8 @@ def invoke_agent(request_context: dict) -> dict | None:
             return None
 
         logger.warning(
-            "Agent API request rejected: status=%s, reason=%s, body=%s",
+            "%s request rejected: status=%s, reason=%s, body=%s",
+            backend_type,
             e.code,
             e.reason,
             error_body,
@@ -178,31 +232,33 @@ def invoke_agent(request_context: dict) -> dict | None:
 
     try:
         queue_message = json.loads(response_body)
-        return parse_agent_response(queue_message)
+        return parse_backend_response(queue_message, backend_type)
     except (json.JSONDecodeError, RuntimeError) as e:
-        logger.exception("Failed to read Agent API response: %s", e)
+        logger.exception("Failed to read %s response: %s", backend_type, e)
         return {"response": "回答を受け取れませんでした。"}
 
 
-def parse_agent_response(response_message: dict) -> dict:
+def parse_backend_response(response_message: dict, backend_type: str) -> dict:
     if not isinstance(response_message, dict):
-        raise RuntimeError("Agent API response body is not an object")
+        raise RuntimeError(f"{backend_type} API response body is not an object")
 
     response = response_message.get("response")
     if not isinstance(response, str) or not response:
-        raise RuntimeError("Agent API response does not contain response")
+        raise RuntimeError(f"{backend_type} API response does not contain response")
 
     response_data = {"response": response}
     ai_disclosure = response_message.get("aiDisclosure")
     if ai_disclosure is not None:
         if not isinstance(ai_disclosure, str):
-            raise RuntimeError("Agent API response aiDisclosure is not a string")
+            raise RuntimeError(
+                f"{backend_type} API response aiDisclosure is not a string"
+            )
         response_data["aiDisclosure"] = ai_disclosure
 
     delivery = response_message.get("delivery")
     if delivery is not None:
         if not isinstance(delivery, dict):
-            raise RuntimeError("Agent API response delivery is not an object")
+            raise RuntimeError(f"{backend_type} API response delivery is not an object")
         response_data["delivery"] = delivery
 
     return response_data

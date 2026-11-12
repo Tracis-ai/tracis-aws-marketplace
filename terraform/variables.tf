@@ -1,6 +1,14 @@
 variable "prefix" {
-  description = "Prefix for resources"
+  description = "Prefix for resources (1 to 20 lowercase letters, numbers, and hyphens)"
   type        = string
+
+  validation {
+    condition = (
+      length(var.prefix) >= 1 && length(var.prefix) <= 20 &&
+      can(regex("^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", var.prefix))
+    )
+    error_message = "prefix must be 1 to 20 lowercase letters, numbers, and hyphens, and must not begin or end with a hyphen."
+  }
 }
 
 variable "subnet_ids" {
@@ -79,4 +87,10 @@ variable "mysql_tools_image_url" {
     condition     = trimspace(var.enabled_db_types) != "mysql" || trimspace(var.mysql_tools_image_url) != ""
     error_message = "mysql_tools_image_url is required when MySQL is enabled."
   }
+}
+
+variable "enable_setup_app" {
+  description = "Whether to deploy the TracisAI Setup application"
+  type        = bool
+  default     = false
 }

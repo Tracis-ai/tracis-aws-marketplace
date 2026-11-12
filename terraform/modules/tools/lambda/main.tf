@@ -3,7 +3,7 @@ module "this" {
   version  = "8.5.0"
   for_each = local.enabled_functions
 
-  function_name = "${var.prefix}-${each.key}-tool-function"
+  function_name = "${var.prefix}-${each.key}-${var.function_name_suffix}"
 
   architectures  = ["arm64"]
   create_package = false
@@ -16,7 +16,7 @@ module "this" {
   timeout               = each.value.timeout
   environment_variables = each.value.environment_variables
 
-  role_name = "${var.prefix}-${each.key}-tool-function-role"
+  role_name = "${var.prefix}-${each.key}-${var.function_name_suffix}-role"
   attach_policy_statements = (
     length(each.value.policy_statements) > 0
     || each.value.vpc_config.enabled

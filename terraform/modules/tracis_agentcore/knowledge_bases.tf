@@ -224,6 +224,10 @@ resource "aws_bedrockagent_data_source" "this" {
   name                 = "s3-data-src"
   data_deletion_policy = "RETAIN"
 
+  server_side_encryption_configuration {
+    kms_key_arn = module.encryption_keys["kb-data-src"].key_arn
+  }
+
   data_source_configuration {
     type = "S3"
 

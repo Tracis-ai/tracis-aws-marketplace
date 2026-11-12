@@ -15,7 +15,7 @@
 
 ## Secret に格納が必要な項目
 
-> [エージェント構築基盤の準備](/docs/create_environment/01_setup_agent_builder/README.md) の手順で CloudFormation の入力パラメータに Secret ARN を指定せずにスタック作成している場合、自動作成される Secret 名は [エージェント関連リソースの初期構築](/docs/create_environment/02_build_agent/README.md) 手順の [出力結果](/docs/create_environment/02_build_agent/README.md#控えておくべき主要な出力値) で確認できます。
+> [エージェント構築基盤の準備](/docs/create_environment/01_setup_agent_builder/README.md) の手順で CloudFormation の入力パラメータに Secret ARN を指定せずにスタック作成している場合、自動作成される Secret 名は [エージェント関連リソースの初期構築](/docs/create_environment/02_build_agent/README.md) 手順の [出力結果](/docs/create_environment/02_build_agent/README.md#控えておくべき出力値) で確認できます。
 
 ### DB Secret （MySQL 利用時）
 
@@ -33,7 +33,16 @@
 | CHATWORK_WEBHOOK_TOKEN | （Chatwork Webhook のトークンを入力）        | Chatwork から受信する Webhook リクエストの署名検証に使用します                     |
 | CHATWORK_API_TOKEN     | （Chatwork API トークンを入力）              | 本製品の AI エージェントが Chatwork に受付・回答メッセージを送信する際に使用します |
 
-> `ChatToolsSecretArn` を指定せずにスタックを作成した場合は、`chat_tools_secret_name` の出力値で自動作成された共有 Secret 名を確認できます。Slack と Chatwork を併用する場合は、4 つのキーを同じ Secret に格納してください。
+Setup アプリを有効にする場合は、会話に使用する同じ Slack App の次の 2 項目を、上記と同じ共有 Secret に追加してください。既存のキーは残してください。
+
+| キー（key）         | 値（value）                           | 使用用途                                   |
+| :------------------ | :------------------------------------ | :----------------------------------------- |
+| SLACK_CLIENT_ID     | （Slack App の Client ID を入力）     | Setup アプリの Slack OIDC 認証に使用します |
+| SLACK_CLIENT_SECRET | （Slack App の Client Secret を入力） | Setup アプリの Slack 認証に使用します      |
+
+[Slack App の管理画面](https://api.slack.com/apps) で対象 App を開き、[Basic Information] → [App Credentials] から取得します。`SLACK_CLIENT_SECRET` は Bot User OAuth Token や Signing Secret とは別の値です。値をドキュメントやチャットに転記せず、Secrets Manager に格納してください。
+
+> `ChatToolsSecretArn` を指定せずにスタックを作成した場合は、`chat_tools_secret_name` の出力値で自動作成された共有 Secret 名を確認できます。Slack と Chatwork を併用する場合は、会話用の 4 つのキーを同じ Secret に格納してください。Setup アプリを有効にする場合は、追加の 2 つのキーも同じ Secret に格納します。
 
 #### Slack Signing Secret の取得方法
 

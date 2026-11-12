@@ -42,8 +42,12 @@ def lambda_handler(event, _):
         logger.error("Missing event payload")
         return
 
+    team_id = event.get("team_id")
+    event_id = event.get("event_id")
     channel = slack_event.get("channel")
     message_ts = slack_event.get("ts")
+    user = slack_event.get("user")
+
     if not (channel and message_ts):
         logger.error(
             "Missing required fields in event payload (channel, ts): %s",
@@ -51,21 +55,24 @@ def lambda_handler(event, _):
         )
         return
 
+    thread_ts = slack_event.get("thread_ts") or message_ts
+    text = slack_event.get("text", "")
+    prompt = extract_prompt(text)
+
+    queue_message = {
+        "prompt": prompt,
+        "metadata": {
+            "platform": PLATFORM,
+            "team_id": team_id,
+            "event_id": event_id,
+            "channel": channel,
+            "thread_ts": thread_ts,
+            "user": user,
+        },
+    }
+    dedup_id = f"{PLATFORM}:{channel}:{message_ts}"
+
     try:
-        thread_ts = slack_event.get("thread_ts") or message_ts
-        text = slack_event.get("text", "")
-        prompt = extract_prompt(text)
-
-        queue_message = {
-            "prompt": prompt,
-            "metadata": {
-                "platform": PLATFORM,
-                "channel": channel,
-                "thread_ts": thread_ts,
-            },
-        }
-        dedup_id = f"{PLATFORM}:{channel}:{message_ts}"
-
         sqs.send_message(
             QueueUrl=SQS_QUEUE_URL,
             MessageBody=json.dumps(queue_message),
@@ -74,13 +81,14 @@ def lambda_handler(event, _):
         )
         logger.info("Message sent to SQS successfully")
 
+        ack_text = "✅ リクエストを受け付けました。しばらくお待ちください..."
         post_thread_reply_to_slack(
             channel=channel,
             thread_ts=thread_ts,
-            text="✅ リクエストを受け付けました。しばらくお待ちください...",
+            text=ack_text,
             token=slack_bot_token,
         )
-        logger.info("Thread reply posted successfully")
+        logger.info("Reply posted successfully")
 
     except Exception as e:
         logger.exception(f"Error handling Slack request: {e}")

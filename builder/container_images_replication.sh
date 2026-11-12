@@ -1,8 +1,8 @@
 readonly AGENT_SOURCE_IMAGE_REPOSITORY="709825985650.dkr.ecr.us-east-1.amazonaws.com/btm/tracisai-free"
 readonly MYSQL_TOOLS_SOURCE_IMAGE_REPOSITORY="709825985650.dkr.ecr.us-east-1.amazonaws.com/btm/tracisai-mysql-tools"
 
-readonly DEFAULT_AGENT_IMAGE_TAG="20261108-101526-21f92cd5"
-readonly DEFAULT_MYSQL_TOOLS_IMAGE_TAG="20261108-101524-3ffec69f"
+readonly DEFAULT_AGENT_IMAGE_TAG="20261112-002906-483df1b8"
+readonly DEFAULT_MYSQL_TOOLS_IMAGE_TAG="20261112-002903-59b1a44c"
 
 readonly DEFAULT_AGENT_IMAGE_URL="${AGENT_SOURCE_IMAGE_REPOSITORY}:${DEFAULT_AGENT_IMAGE_TAG}"
 readonly DEFAULT_MYSQL_TOOLS_IMAGE_URL="${MYSQL_TOOLS_SOURCE_IMAGE_REPOSITORY}:${DEFAULT_MYSQL_TOOLS_IMAGE_TAG}"
@@ -11,8 +11,19 @@ readonly EXPIRED_AGENT_IMAGE_URLS=(
   "709825985650.dkr.ecr.us-east-1.amazonaws.com/btm/tracis-free:20260520-125957-0fb7c715"
   "709825985650.dkr.ecr.us-east-1.amazonaws.com/btm/tracisai-free:20260826-113900-f19f9f21"
   "709825985650.dkr.ecr.us-east-1.amazonaws.com/btm/tracisai-free:20260828-095016-218a6dd4"
+  "709825985650.dkr.ecr.us-east-1.amazonaws.com/btm/tracisai-free:20261015-114551-f6af30fc"
+  "709825985650.dkr.ecr.us-east-1.amazonaws.com/btm/tracisai-free:20261019-133826-9cf87625"
+  "709825985650.dkr.ecr.us-east-1.amazonaws.com/btm/tracisai-free:20261022-061425-ae795a8c"
+  "709825985650.dkr.ecr.us-east-1.amazonaws.com/btm/tracisai-free:20261024-092930-13fc230f"
+  "709825985650.dkr.ecr.us-east-1.amazonaws.com/btm/tracisai-free:20261108-101526-21f92cd5"
 )
-readonly EXPIRED_MYSQL_TOOLS_IMAGE_URLS=()
+readonly EXPIRED_MYSQL_TOOLS_IMAGE_URLS=(
+  "709825985650.dkr.ecr.us-east-1.amazonaws.com/btm/tracisai-mysql-tools:20261015-114552-ccd88c02"
+  "709825985650.dkr.ecr.us-east-1.amazonaws.com/btm/tracisai-mysql-tools:20261019-133823-16b72948"
+  "709825985650.dkr.ecr.us-east-1.amazonaws.com/btm/tracisai-mysql-tools:20261022-061424-8ee7302e"
+  "709825985650.dkr.ecr.us-east-1.amazonaws.com/btm/tracisai-mysql-tools:20261024-092932-ee21c7e7"
+  "709825985650.dkr.ecr.us-east-1.amazonaws.com/btm/tracisai-mysql-tools:20261108-101524-3ffec69f"
+)
 
 resolve_image_url() {
   local image_type="$1"

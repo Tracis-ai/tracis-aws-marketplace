@@ -7,6 +7,11 @@
 - [利用終了時の環境削除手順](/docs/delete_environment/README.md)
 
 
+## Setup アプリによるナレッジベースの準備
+
+Setup アプリを使用したナレッジベースの準備手順は、[ナレッジベースの準備](/docs/create_environment/05_prepare_knowledgebases/README.md) を参照してください。
+
+
 ## 利用条件・制限事項
 TracisAI は現在ベータ版として提供されています。
 詳細な利用条件および制限事項については、[利用規約](/docs/TERMS.md) をご確認ください。
@@ -28,6 +33,10 @@ TracisAI は現在ベータ版として提供されています。
 3. しばらく待つと、同じスレッド内に TracisAI から回答メッセージが投稿される
 
 > TracisAI は Slack のメンション（`app_mention`）されたメッセージのみを処理します。メンションを付けずに発言した場合は応答しません。
+
+Slack App を招待したチャンネルでは、参加メンバー全員が TracisAI を利用できます。Setup アプリを有効にしている場合は、同じメンバーが Setup アプリも利用できます。
+
+利用者を絞る場合は、[Slack App のチャンネル招待手順](/docs/create_environment/03_1_create_slack_app/README.md#slack-app-のチャンネル招待手順) に記載の運用方法を確認してください。
 
 #### Chatwork
 

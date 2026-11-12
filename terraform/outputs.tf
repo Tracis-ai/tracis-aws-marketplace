@@ -17,3 +17,13 @@ output "request_api_urls" {
 output "chat_tools_secret_name" {
   value = local.chat_tools_secret_arn == "" ? aws_secretsmanager_secret.chat_tools[0].name : null
 }
+
+output "setup_app_web_url" {
+  description = "TracisAI Setup Web URL, available after deployment when Setup is enabled"
+  value       = try(module.setup_app[0].web_app_url, null)
+}
+
+output "setup_app_oidc_redirect_urls" {
+  description = "TracisAI Setup OAuth callback URLs, available when Setup is enabled"
+  value       = try(module.setup_app[0].oidc_redirect_urls, null)
+}

@@ -42,3 +42,10 @@ variable "mysql_connection" {
     secret_arn = optional(string)
   })
 }
+
+variable "function_name_suffix" {
+  description = "Suffix for Lambda function names and their execution role names"
+  type        = string
+  default     = "tool-function"
+  nullable    = false
+}
