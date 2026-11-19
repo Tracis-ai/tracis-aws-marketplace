@@ -3,6 +3,7 @@ resource "aws_bedrockagentcore_agent_runtime" "this" {
   agent_runtime_name = local.runtime_name
   description        = "AgentCore Runtime for TracisAI Agent"
   role_arn           = module.agentcore_runtime_role.arn
+  platform_version   = "V2"
 
   agent_runtime_artifact {
     container_configuration {
